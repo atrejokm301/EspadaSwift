@@ -1,0 +1,40 @@
+# Xcode / build products
+build/
+build-*/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.moved-aside
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+
+# SPM
+.swiftpm/
+# Keep Package.resolved out — XcodeGen + SPM regenerate; avoid lock churn
+Package.resolved
+
+# Logs & local scratch
+*.log
+build-*.log
+*.trace
+
+# OS / editor
+.DS_Store
+.idea/
+*.swp
+*~
+
+# Local device / export junk
+user-attach*
+extracted-ref*
+*.bin
+
+# Optional local assets not needed in repo
+logo-candidates/
+logo-master-lion.jpg

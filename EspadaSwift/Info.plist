@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleDisplayName</key>
+	<string>Espada</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
+	<key>UIAppFonts</key>
+	<array>
+		<string>GoogleSansFlex-Regular.ttf</string>
+		<string>GoogleSansFlex-Medium.ttf</string>
+		<string>GoogleSansFlex-SemiBold.ttf</string>
+		<string>GoogleSansFlex-Bold.ttf</string>
+		<string>Roboto-Regular.ttf</string>
+		<string>Roboto-Medium.ttf</string>
+		<string>Roboto-SemiBold.ttf</string>
+		<string>Roboto-Bold.ttf</string>
+		<string>Inter-Regular.ttf</string>
+		<string>Inter-Medium.ttf</string>
+		<string>Inter-SemiBold.ttf</string>
+		<string>Inter-Bold.ttf</string>
+		<string>RobotoFlex-Regular.ttf</string>
+		<string>LibertinusSerif-Regular.ttf</string>
+	</array>
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>UISupportsDocumentBrowser</key>
+	<true/>
+	<!-- When the user has True Tone on, bias white-point adaptation toward reading (warmer). -->
+	<!-- Cannot force True Tone on; only shapes adaptation if the system feature is enabled. -->
+	<key>UIWhitePointAdaptivityStyle</key>
+	<string>UIWhitePointAdaptivityStyleReading</string>
+	<!-- Allow ProMotion refresh above 60 Hz on iPhone (paired with preferredFrameRateRange on scroll). -->
+	<key>CADisableMinimumFrameDurationOnPhone</key>
+	<true/>
+</dict>
+</plist>

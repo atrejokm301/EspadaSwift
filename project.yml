@@ -1,0 +1,149 @@
+name: EspadaSwift
+options:
+  bundleIdPrefix: com.asignaciondelcielo
+  deploymentTarget:
+    iOS: "27.0"
+  xcodeVersion: "26.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    TARGETED_DEVICE_FAMILY: "1,2"
+    IPHONEOS_DEPLOYMENT_TARGET: "27.0"
+    DEVELOPMENT_TEAM: RV23UF9649
+    CODE_SIGN_STYLE: Automatic
+    CURRENT_PROJECT_VERSION: 3
+    MARKETING_VERSION: 1.0.1
+  configs:
+    # Day-to-day Debug: fast compile, LTO off
+    Debug:
+      SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+      GCC_OPTIMIZATION_LEVEL: "0"
+      LLVM_LTO: "NO"
+      SWIFT_COMPILATION_MODE: "singlefile"
+      ENABLE_TESTABILITY: YES
+      ONLY_ACTIVE_ARCH: YES
+    # Device polish: -O3, wholemodule, full (fat) LTO
+    # Strip only on the app target (see EspadaSwift target configs) — never strip SPM .o
+    Release:
+      SWIFT_OPTIMIZATION_LEVEL: "-O"
+      SWIFT_COMPILATION_MODE: "wholemodule"
+      GCC_OPTIMIZATION_LEVEL: "3"
+      LLVM_LTO: "YES" # full / fat LTO (not thin)
+      DEAD_CODE_STRIPPING: YES
+      ENABLE_NS_ASSERTIONS: NO
+      VALIDATE_PRODUCT: YES
+      ONLY_ACTIVE_ARCH: YES
+      SWIFT_ENFORCE_EXCLUSIVE_ACCESS: "on"
+      CLANG_ENABLE_MODULES: YES
+      # Avoid stripping package intermediates (breaks fat LTO)
+      COPY_PHASE_STRIP: NO
+      STRIP_INSTALLED_PRODUCT: NO
+      DEPLOYMENT_POSTPROCESSING: NO
+
+packages:
+  GRDB:
+    url: https://github.com/groue/GRDB.swift
+    from: 7.4.0
+
+targets:
+  EspadaSwift:
+    type: application
+    platform: iOS
+    sources:
+      - path: EspadaSwift
+        excludes:
+          - "**/Resources/**"
+          - "**/*.ttf"
+    # Fonts via script (XcodeGen resource phase unreliable here). Asset catalog in sources.
+    postCompileScripts:
+      - name: Embed reading fonts
+        basedOnDependencyAnalysis: false
+        script: |
+          set -e
+          DEST="${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}"
+          mkdir -p "$DEST"
+          for f in \
+            GoogleSansFlex-Regular.ttf GoogleSansFlex-Medium.ttf GoogleSansFlex-SemiBold.ttf GoogleSansFlex-Bold.ttf \
+            Roboto-Regular.ttf Roboto-Medium.ttf Roboto-SemiBold.ttf Roboto-Bold.ttf \
+            Inter-Regular.ttf Inter-Medium.ttf Inter-SemiBold.ttf Inter-Bold.ttf \
+            RobotoFlex-Regular.ttf \
+            LibertinusSerif-Regular.ttf
+          do
+            cp -f "${SRCROOT}/Fonts/${f}" "${DEST}/${f}"
+          done
+          echo "Embedded reading + script fonts into ${DEST}"
+    settings:
+      base:
+        # Reuse free-provisioning slot already on device (max 3 apps on free Apple ID)
+        PRODUCT_BUNDLE_IDENTIFIER: com.asignaciondelcielo.espada37swift
+        PRODUCT_NAME: Espada
+        PRODUCT_MODULE_NAME: Espada
+        INFOPLIST_KEY_CFBundleDisplayName: Espada
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+        INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace: YES
+        INFOPLIST_KEY_UIFileSharingEnabled: YES
+        INFOPLIST_KEY_UISupportsDocumentBrowser: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_EMIT_LOC_STRINGS: YES
+        ENABLE_PREVIEWS: YES
+      configs:
+        Release:
+          # Applied only to the app target — do not strip SPM .o intermediates
+          DEPLOYMENT_POSTPROCESSING: YES
+          STRIP_INSTALLED_PRODUCT: YES
+          STRIP_STYLE: all
+          STRIP_SWIFT_SYMBOLS: YES
+          DEAD_CODE_STRIPPING: YES
+    info:
+      path: EspadaSwift/Info.plist
+      properties:
+        UIAppFonts:
+          - GoogleSansFlex-Regular.ttf
+          - GoogleSansFlex-Medium.ttf
+          - GoogleSansFlex-SemiBold.ttf
+          - GoogleSansFlex-Bold.ttf
+          - Roboto-Regular.ttf
+          - Roboto-Medium.ttf
+          - Roboto-SemiBold.ttf
+          - Roboto-Bold.ttf
+          - Inter-Regular.ttf
+          - Inter-Medium.ttf
+          - Inter-SemiBold.ttf
+          - Inter-Bold.ttf
+          - RobotoFlex-Regular.ttf
+          - LibertinusSerif-Regular.ttf
+        UISupportsDocumentBrowser: true
+        LSSupportsOpeningDocumentsInPlace: true
+        # True Tone: warmer adaptation when the user has True Tone enabled (cannot force on).
+        UIWhitePointAdaptivityStyle: UIWhitePointAdaptivityStyleReading
+        # Allow ProMotion > 60 Hz on iPhone (scroll views set preferredFrameRateRange).
+        CADisableMinimumFrameDurationOnPhone: true
+        UIFileSharingEnabled: true
+        CFBundleDisplayName: Espada
+    dependencies:
+      - package: GRDB
+        product: GRDB
+    scheme:
+      testTargets:
+        - EspadaSwiftTests
+
+  EspadaSwiftTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: EspadaSwiftTests
+    dependencies:
+      - target: EspadaSwift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.asignaciondelcielo.espadaswift.tests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Espada.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Espada"
+        BUNDLE_LOADER: "$(TEST_HOST)"
