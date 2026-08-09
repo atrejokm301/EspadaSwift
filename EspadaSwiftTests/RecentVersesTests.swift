@@ -42,39 +42,68 @@ final class RecentVersesTests: XCTestCase {
     }
 
     func testCrossReferenceModuleHeuristic() {
-        let tsk = ModuleInfo(
-            path: "/tmp/tske_v12.cmti",
+        func module(
+            filename: String,
+            title: String,
+            abbreviation: String,
+            kind: ModuleKind
+        ) -> ModuleInfo {
+            ModuleInfo(
+                path: "/tmp/\(filename)",
+                filename: filename,
+                title: title,
+                abbreviation: abbreviation,
+                kind: kind,
+                encrypted: false,
+                hasStrongs: false,
+                version: 3
+            )
+        }
+
+        let tsk = module(
             filename: "tske_v12.cmti",
             title: "Treasury of Scripture Knowledge Enhanced",
             abbreviation: "TSKe",
-            kind: .commentary,
-            encrypted: false,
-            hasStrongs: false,
-            version: 3
+            kind: .commentary
         )
-        let plain = ModuleInfo(
-            path: "/tmp/MatthewHenry.cmti",
+        let spanishRefs = module(
+            filename: "refs_es.cmti",
+            title: "Referencias bíblicas",
+            abbreviation: "REF",
+            kind: .commentary
+        )
+        let concordance = module(
+            filename: "concordancia.cmti",
+            title: "Concordancia de pasajes",
+            abbreviation: "CONC",
+            kind: .commentary
+        )
+        let plain = module(
             filename: "MatthewHenry.cmti",
             title: "Matthew Henry Commentary",
             abbreviation: "MH",
-            kind: .commentary,
-            encrypted: false,
-            hasStrongs: false,
-            version: 3
+            kind: .commentary
         )
-        let bible = ModuleInfo(
-            path: "/tmp/NVI.bbli",
+        let bible = module(
             filename: "NVI.bbli",
             title: "NVI",
             abbreviation: "NVI",
-            kind: .bible,
-            encrypted: false,
-            hasStrongs: false,
-            version: 3
+            kind: .bible
         )
+        // Strong concordance as dictionary must stay out of CR list
+        let strongDict = module(
+            filename: "Strong.dcti",
+            title: "Nueva Concordancia Strong Exhaustiva",
+            abbreviation: "Strong",
+            kind: .dictionary
+        )
+
         XCTAssertTrue(tsk.isCrossReferenceModule)
+        XCTAssertTrue(spanishRefs.isCrossReferenceModule)
+        XCTAssertTrue(concordance.isCrossReferenceModule)
         XCTAssertFalse(plain.isCrossReferenceModule)
         XCTAssertFalse(bible.isCrossReferenceModule)
+        XCTAssertFalse(strongDict.isCrossReferenceModule)
     }
 
     func testRecentVerseLabel() {
