@@ -57,14 +57,14 @@ Al tocar una palabra:
 
 **Requisitos (importar una vez en Módulos):** RV1960 + iRV 1960+ + léxico Strong. No cambie la Biblia de lectura al interlineal.
 
-## Relación con otros proyectos
+## Relación con otros proyectos (familia Espada)
 
-| Proyecto | Stack | Rol |
-|----------|--------|-----|
-| `~/Espada3.7` | Tauri + Rust | Mac de referencia |
-| `~/EspadaMobile` | Capacitor + sql.js | iOS WebView anterior |
-| `~/EspadaSwift` | SwiftUI + GRDB | **Esta app nativa** |
-
+| Platform | Where | Stack |
+|----------|--------|--------|
+| **macOS** | [Espada3.7 `main`](https://github.com/atrejokm301/Espada3.7) | Apple Silicon · Releases |
+| **Windows** | [Espada3.7 `windows`](https://github.com/atrejokm301/Espada3.7/tree/windows) | Tauri 2 + WebView2 + e-Sword |
+| **iOS / iPadOS** | [EspadaSwift](https://github.com/atrejokm301/EspadaSwift) (este repo) | SwiftUI + GRDB |
+| EspadaMobile (legacy) | local | Capacitor + sql.js |
 ## Licencia de módulos
 
 Los módulos e-Sword son de usted / sus licencias. Esta app es para **uso personal offline**.  
