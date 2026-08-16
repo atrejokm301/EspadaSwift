@@ -72,4 +72,16 @@ final class AppThemeTests: XCTestCase {
             XCTAssertEqual(theme.swatchColors.count, 2, "\(theme) swatch")
         }
     }
+
+    func testHighlightPastelsKeepStableRawValues() {
+        // Saved highlights must still decode after recolor.
+        XCTAssertEqual(HighlightColor.allCases.map(\.rawValue), [
+            "yellow", "green", "blue", "pink", "orange", "purple"
+        ])
+        for c in HighlightColor.allCases {
+            XCTAssertFalse(c.label.isEmpty)
+            _ = c.color
+            _ = c.swatch
+        }
+    }
 }

@@ -23,11 +23,17 @@ struct RecentVerse: Codable, Hashable, Identifiable, Sendable {
 }
 
 extension ModuleInfo {
-    /// Heuristic: commentaries that are cross-reference tools (TSK, Torrey, Spanish refs…).
+    /// Heuristic: commentaries that are cross-reference tools (TSK, Torrey, Spanish CR…).
     /// True cross-ref modules are usually `.cmti` with dense `<ref>` chains per verse.
     ///
     /// Only `.commentary` modules match — Strong / word concordances as `.dcti`
     /// stay in Diccionarios (e.g. "Nueva Concordancia Strong Exhaustiva").
+    ///
+    /// Bare "referencia" / "concordancia" are included by choice: Spanish cross-reference
+    /// modules are named inconsistently, and Kevin would rather see an ordinary commentary
+    /// in the sheet occasionally than miss a real cross-reference tool. Widening this is
+    /// safe precisely because the `.commentary` guard above already excludes the `.dcti`
+    /// word concordances.
     var isCrossReferenceModule: Bool {
         guard kind == .commentary else { return false }
         let hay = (title + " " + abbreviation + " " + filename).lowercased()
@@ -35,9 +41,9 @@ extension ModuleInfo {
             "tsk", "tske", "torrey",
             "cross ref", "crossref", "cross-ref",
             "cross_reference", "crossreferences", "x-ref", "xref",
-            "parallel passage", "treasury of scripture",
+            "parallel passage", "parallel passages", "pasajes paralelos",
+            "treasury of scripture", "treasury of scripture knowledge",
             "referencias cruzadas", "referencia cruzada",
-            "pasajes paralelos",
             "referencias", "referencia",
             "concordancia", "concordance",
         ]

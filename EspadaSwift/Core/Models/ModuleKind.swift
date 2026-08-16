@@ -55,6 +55,31 @@ struct ModuleInfo: Identifiable, Hashable, Codable, Sendable {
     let encrypted: Bool
     let hasStrongs: Bool
     let version: Int
+    /// Encoding health measured at catalog time. `nil` when not yet sampled (huge files
+    /// are skipped on the lightweight scan) or when read from an older meta cache.
+    let health: ModuleHealth?
+
+    init(
+        path: String,
+        filename: String,
+        title: String,
+        abbreviation: String,
+        kind: ModuleKind,
+        encrypted: Bool,
+        hasStrongs: Bool,
+        version: Int,
+        health: ModuleHealth? = nil
+    ) {
+        self.path = path
+        self.filename = filename
+        self.title = title
+        self.abbreviation = abbreviation
+        self.kind = kind
+        self.encrypted = encrypted
+        self.hasStrongs = hasStrongs
+        self.version = version
+        self.health = health
+    }
 
     var displayName: String {
         abbreviation.isEmpty ? title : abbreviation
@@ -98,19 +123,31 @@ struct DictEntry: Identifiable, Hashable, Sendable {
     let originalScript: String
     /// Latin-letter pronunciation / transliteration (any module that provides it).
     let pronunciation: String
+    /// RV1960 Spanish glosses marked by the publisher, in article order.
+    let glosses: [String]
+    /// Publisher sections when one entry compiles several dictionaries (Multiléxico).
+    let sections: [LexiconArticle.Section]
+    /// Other Strong codes this article cross-references.
+    let strongRefs: [String]
 
     init(
         topic: String,
         plain: String,
         html: String,
         originalScript: String = "",
-        pronunciation: String = ""
+        pronunciation: String = "",
+        glosses: [String] = [],
+        sections: [LexiconArticle.Section] = [],
+        strongRefs: [String] = []
     ) {
         self.topic = topic
         self.plain = plain
         self.html = html
         self.originalScript = originalScript
         self.pronunciation = pronunciation
+        self.glosses = glosses
+        self.sections = sections
+        self.strongRefs = strongRefs
     }
 }
 

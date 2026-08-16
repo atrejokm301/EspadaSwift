@@ -300,11 +300,18 @@ enum ESwordText {
         s = replace(s, pattern: #"(?is)<script[^>]*>.*?</script>"#) { _ in " " }
         s = replace(s, pattern: #"(?is)<head[^>]*>.*?</head>"#) { _ in " " }
 
+        // Interlinear alignment notation is metadata, not Scripture. Runs *before* the
+        // semantic-tag pass so it can anchor on the original <num>/<heb>/<grk> structure.
+        if isInterlinearMarkup(s) {
+            s = stripInterlinearNotation(s)
+        }
+
         // --- Protect e-Sword semantic tags (before any tag strip) ---
 
-        // <num>H3068</num>  /  <num>G26</num>
-        s = replace(s, pattern: #"(?i)<num>\s*([HG]\d+)\s*</num>"#) { m in
-            keepMarkers ? "⟦STRONG:\(m[1].uppercased())⟧" : " \(m[1].uppercased()) "
+        // <num>H3068</num> / <num>G26</num> / <num>H 3068</num> (optional space after H/G)
+        s = replace(s, pattern: #"(?i)<num>\s*([HG]\s*\d+)\s*</num>"#) { m in
+            let code = m[1].uppercased().replacingOccurrences(of: " ", with: "")
+            return keepMarkers ? "⟦STRONG:\(code)⟧" : " \(code) "
         }
 
         // Purple Strong spans used by many modern modules (style="color:#804DB3"):
@@ -401,6 +408,11 @@ enum ESwordText {
         // Entities that were inside attributes of broken tags — second pass
         s = decodeAllHTMLEntities(s)
 
+        // Repair damage in the module file itself (private-use glyphs, mojibake, dead
+        // control characters). Runs after entity decode because several modules store
+        // these as `&#xE003;` rather than as literal characters. No-op for clean modules.
+        s = ModuleTextRepair.sanitize(s)
+
         // Gén_25:16 → Gén 25:16
         s = replace(s, pattern: #"\b([A-Za-záéíóúÁÉÍÓÚñÑ\.]+)_(\d+:\d+(?:-\d+)?)"#) { m in
             "\(m[1]) \(m[2])"
@@ -408,6 +420,95 @@ enum ESwordText {
 
         s = collapseWhitespace(s)
         return s.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    // MARK: - Interlinear alignment notation
+
+    /// Cheap probe: does this field use e-Sword interlinear / Strong markup?
+    /// Gates `stripInterlinearNotation` so commentaries keep their `►` bullets and
+    /// dictionaries keep Hebrew followed by sense numbers.
+    static func isInterlinearMarkup(_ raw: String) -> Bool {
+        raw.contains("<num>") || raw.contains("<NUM>")
+            || raw.contains("<blu>") || raw.contains("<BLU>")
+    }
+
+    /// Remove interlinear *metadata* that e-Sword glues into the verse body.
+    ///
+    /// Real iRV 1960+ Génesis 1:1 as stored:
+    /// ```
+    /// <heb>בְּ</heb>1 <span style="color:#804DB3;"><sup> PB</sup></span> <blu>En</blu>
+    /// <heb>→</heb> <span style="color:#C0C0C0;">el</span>
+    /// <heb>רֵאשִׁית</heb>2 <num>H7225</num>:NCcSFC <blu>principio</blu>
+    /// ```
+    /// Without this pass the reader sees
+    /// `בְּ 1 PB En → el רֵאשִׁית 2 H7225 :NCcSFC principio` — the word-order digits,
+    /// morphology codes, alignment arrows and stray colons all render as text.
+    ///
+    /// Kept deliberately: `<span style="color:#C0C0C0;">` supplied words ("el", "de"),
+    /// which are real Spanish the translators added and belong in the sentence, and the
+    /// Latin transliteration between `</grk>` and `<num>` — that *is* the pronunciation.
+    static func stripInterlinearNotation(_ input: String) -> String {
+        var s = input
+
+        // Purple morphology tags that carry no Strong number: <sup> PB</sup>, <sup> XD</sup>.
+        // Restricted to the interlinear morph purple (#804DB3): #800080 is the *lemma*
+        // colour in Strong lexicon articles and must never be eaten here.
+        s = replace(
+            s,
+            pattern: #"(?is)<span[^>]*color\s*[:=]\s*["']?#?804DB3[^>]*>\s*(?:<sup[^>]*>)?\s*([A-Za-z]{1,6})\s*(?:</sup>)?\s*</span>"#
+        ) { _ in " " }
+
+        // Morphology glued to the Strong code with a colon (Hebrew OT):
+        // `<num>H7225</num>:NCcSFC`
+        s = replace(s, pattern: #"(?i)(</num>)\s*:\s*[A-Za-z][A-Za-z0-9\-]{0,11}"#) { $0[1] }
+
+        // Morphology run between the last Strong and the Spanish gloss (Greek NT):
+        // `<num>G3588</num> <num>G2316</num> DNSM NNSM <blu>Dios</blu>`
+        //
+        // Structural rule, only valid for true reverse interlinears: in a `<blu>` module
+        // every Spanish word lives inside `<blu>`, so bare tokens sitting between
+        // `</num>` and `<blu>` are analytical codes. Plain "RV1960 + Strong" modules have
+        // no `<blu>` at all and are left untouched — there, text after `</num>` is Scripture.
+        //
+        // Every token is still shape-checked (must carry a capital, like `DNSM`, `VAAI3S`,
+        // `RP-GSM`, `PA`, `C`) so an unknown `<blu>` module that puts real lowercase
+        // Spanish in this slot keeps its words.
+        if s.range(of: #"(?i)<blu>"#, options: .regularExpression) != nil {
+            s = replace(
+                s,
+                pattern: #"(?i)(</num>)((?:\s+[A-Za-z][A-Za-z0-9\-]{0,11}){1,6})(?=\s*<blu>)"#
+            ) { m in
+                let tokens = m[2].split(whereSeparator: \.isWhitespace)
+                let allMorph = tokens.allSatisfy { $0.contains(where: \.isUppercase) }
+                return allMorph ? m[1] : m[0]
+            }
+        }
+
+        // Word-order index printed after the original-script run:
+        // `<heb>רֵאשִׁית</heb>2` and `<grk>χαίρετε1</grk>`.
+        s = replace(s, pattern: #"(?i)(</(?:heb|grk|lat|ara|syr|gra)>)\s*\d{1,3}\b"#) { $0[1] }
+        s = replace(
+            s,
+            pattern: "([\u{0590}-\u{05FF}\u{FB1D}-\u{FB4F}\u{0370}-\u{03FF}\u{1F00}-\u{1FFF}])\\d{1,3}\\b"
+        ) { $0[1] }
+
+        // Untranslated-particle placeholders. iRV marks a Hebrew particle that has no
+        // Spanish equivalent (אֵת, pronominal suffixes) with a bullet — sometimes wrapped
+        // in <blu>, sometimes bare between two glosses. The Strong code is kept; only the
+        // bullet is dropped, so `Jehová • es mi pastor` reads `Jehová es mi pastor`.
+        s = replace(s, pattern: #"(?i)<blu>\s*[•·‒–—]\s*</blu>"#) { _ in " " }
+        s = replace(s, pattern: #"(?:(?<=\s)|^)[•·](?=\s|$)"#) { _ in " " }
+
+        // Alignment pointers (`► 10`, `◄ 21`) and supplied-word arrows (`→`, `←`).
+        s = replace(s, pattern: "[\u{25BA}\u{25C4}\u{25B6}\u{25C0}]\\s*\\d{0,3}") { _ in " " }
+        s = s.replacingOccurrences(of: "\u{2192}", with: " ") // →
+        s = s.replacingOccurrences(of: "\u{2190}", with: " ") // ←
+
+        // Phrase-grouping brackets around multi-word alignments: ‹ τὸν9 υἱὸν10 ›
+        s = s.replacingOccurrences(of: "\u{2039}", with: " ") // ‹
+        s = s.replacingOccurrences(of: "\u{203A}", with: " ") // ›
+
+        return s
     }
 
     // MARK: - HTML entities (complete)

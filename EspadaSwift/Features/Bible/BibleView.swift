@@ -116,10 +116,10 @@ struct BibleView: View {
         }
     }
 
-    /// Overlay chrome under the system nav: one continuous glass strip, one hairline.
+    /// Under system frosted nav: floating glass pills (Kavsoft / Fitness+ style).
     @ViewBuilder
     private var topChrome: some View {
-        VStack(spacing: 0) {
+        VStack(spacing: 6) {
             if let banner = session.contextBannerText {
                 ContextBanner(text: banner) {
                     session.clearSelection()
@@ -130,16 +130,9 @@ struct BibleView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
-        // Single separator for the whole inset stack (not per-row hairlines).
-        .overlay(alignment: .bottom) {
-            if session.contextBannerText != nil || !chrome.isHidden {
-                Rectangle()
-                    .fill(themes.theme.hairline.opacity(0.55))
-                    .frame(height: 0.5)
-            }
-        }
     }
 
+    /// Floating capsules — plain HStack so taps work (no ScrollView steal).
     private var controlBar: some View {
         HStack(spacing: 8) {
             Button {
@@ -147,20 +140,22 @@ struct BibleView: View {
                 showPassagePicker = true
             } label: {
                 HStack(spacing: 4) {
-                    Text("\(BibleBooks.name(for: session.book)) \(session.chapter)")
+                    Text(locationPillTitle)
                         .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                     Image(systemName: "chevron.down")
                         .font(.caption2.weight(.bold))
                 }
-                .foregroundStyle(themes.theme.primaryText)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .espadaGlassChip(shape: Capsule())
+                .foregroundStyle(themes.theme.background)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .background(Capsule(style: .continuous).fill(themes.theme.primaryText))
+                .contentShape(Capsule())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Elegir libro y capítulo")
-            // iPad: wide dual-pane popover; iPhone: sheet via compact adaptation
+            .layoutPriority(1)
             .popover(isPresented: $showPassagePicker, arrowEdge: .top) {
                 PassagePickerView(
                     selectedBook: session.book,
@@ -168,12 +163,10 @@ struct BibleView: View {
                 ) { book, chapter in
                     session.goTo(book: book, chapter: chapter, verse: 1)
                 }
-                // Never apply iPad minWidth on phone — that was crushing the book picker
                 .espadaPassagePopoverFrame(wide: usePadChrome)
                 .presentationCompactAdaptation(.sheet)
             }
 
-            // Passage tools next to the location chip (not the bottom tab dock).
             RecentVersesMenu {
                 chrome.show()
             }
@@ -184,36 +177,59 @@ struct BibleView: View {
 
             Spacer(minLength: 4)
 
-            frostIconButton(
+            glassIconPill(
                 systemName: studyMode ? "text.magnifyingglass" : "text.alignleft",
-                label: studyMode ? "Modo estudio activo" : "Modo lectura"
+                label: studyMode ? "Modo estudio activo" : "Modo lectura",
+                emphasized: studyMode
             ) {
                 studyMode.toggle()
                 if studyMode { session.ensureTokensForSelectedVerse() }
             }
 
-            frostIconButton(systemName: "chevron.left", label: "Capítulo anterior") {
+            glassIconPill(systemName: "chevron.left", label: "Capítulo anterior") {
                 session.previousChapter()
             }
 
-            frostIconButton(systemName: "chevron.right", label: "Capítulo siguiente") {
+            glassIconPill(systemName: "chevron.right", label: "Capítulo siguiente") {
                 session.nextChapter()
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        // One continuous Liquid Glass strip under the nav (not free-floating chips).
-        .espadaGlassChromeBar()
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
     }
 
-    private func frostIconButton(systemName: String, label: String, action: @escaping () -> Void) -> some View {
+    private var locationPillTitle: String {
+        let name = BibleBooks.name(for: session.book)
+        if !usePadChrome, name.count > 14 {
+            let abbr = BibleBooks.book(number: session.book)?.abbreviation ?? name
+            return "\(abbr) \(session.chapter)"
+        }
+        return "\(name) \(session.chapter)"
+    }
+
+    @ViewBuilder
+    private func glassIconPill(
+        systemName: String,
+        label: String,
+        emphasized: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
         Button(action: action) {
-            Image(systemName: systemName)
-                .font(.body.weight(.semibold))
-                .foregroundStyle(themes.theme.primaryText)
-                .frame(width: 36, height: 36)
-                .contentShape(Circle())
-                .espadaGlassChip(shape: Circle())
+            if emphasized {
+                Image(systemName: systemName)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(themes.theme.background)
+                    .frame(width: 38, height: 38)
+                    .background(Circle().fill(themes.theme.primaryText))
+                    .contentShape(Circle())
+            } else {
+                Image(systemName: systemName)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(themes.theme.primaryText)
+                    .frame(width: 38, height: 38)
+                    .contentShape(Circle())
+                    .espadaGlassChip(shape: Circle(), liquid: true)
+            }
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)

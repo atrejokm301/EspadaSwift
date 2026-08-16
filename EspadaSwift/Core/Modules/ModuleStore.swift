@@ -29,9 +29,16 @@ final class ModuleStore {
     let chapterCache = ChapterCache(maxEntries: 8)
 
     private struct CachedMeta: Codable {
+        /// Bump when `ModuleInfo` gains a field that has to be measured rather than
+        /// defaulted. Old entries lack the key, so decoding throws and the whole cache is
+        /// discarded — one rescan, then everything is populated again.
+        /// 2: adds `health`.
+        let schemaVersion: Int
         let size: UInt64
         let mtime: TimeInterval
         let info: ModuleInfo
+
+        static let currentSchemaVersion = 2
     }
 
     var modulesDirectory: URL {
@@ -103,6 +110,7 @@ final class ModuleStore {
             }
             rebuildCache(from: list, dir: dir)
             modules = Self.sorted(list)
+            demotedDuplicatePaths = Self.demotedDuplicates(in: modules)
         } catch {
             lastError = error.localizedDescription
             // Keep previous catalog rather than crash
@@ -110,7 +118,42 @@ final class ModuleStore {
     }
 
     func modules(of kind: ModuleKind, includeEncrypted: Bool = false) -> [ModuleInfo] {
-        modules.filter { $0.kind == kind && (includeEncrypted || !$0.encrypted) }
+        let list = modules.filter { $0.kind == kind && (includeEncrypted || !$0.encrypted) }
+        guard !demotedDuplicatePaths.isEmpty else { return list }
+        // Stable partition: a damaged copy sinks below its clean twin but is never hidden,
+        // so anything that takes `.first` (default module, badges) lands on the good one.
+        let clean = list.filter { !demotedDuplicatePaths.contains($0.path) }
+        let damaged = list.filter { demotedDuplicatePaths.contains($0.path) }
+        return clean + damaged
+    }
+
+    /// Paths of modules that duplicate a healthier copy of the same work.
+    /// Recomputed on every catalog reload; empty when nothing is duplicated.
+    private(set) var demotedDuplicatePaths: Set<String> = []
+
+    /// For each group of copies of the same work, keep the healthiest and demote the rest.
+    static func demotedDuplicates(in list: [ModuleInfo]) -> Set<String> {
+        var demoted: Set<String> = []
+        var groups: [[ModuleInfo]] = []
+
+        for module in list {
+            if let index = groups.firstIndex(where: { $0[0].isSameWork(as: module) }) {
+                groups[index].append(module)
+            } else {
+                groups.append([module])
+            }
+        }
+
+        for group in groups where group.count > 1 {
+            let best = group.min { $0.healthRank < $1.healthRank }
+            guard let best, let bestRank = group.map(\.healthRank).min() else { continue }
+            // Only demote when a copy is genuinely healthier — identical twins keep order.
+            guard group.contains(where: { $0.healthRank > bestRank }) else { continue }
+            for module in group where module.path != best.path && module.healthRank > bestRank {
+                demoted.insert(module.path)
+            }
+        }
+        return demoted
     }
 
     /// Copy preferred Spanish study Bibles from Downloads into the app library if missing.
@@ -292,8 +335,10 @@ final class ModuleStore {
     /// Wipe catalog modules (recovery). Does not delete the app.
     @MainActor
     func clearAllModules() async {
+        dbLock.lock()
         openDBs.removeAll()
         openOrder.removeAll()
+        dbLock.unlock()
         chapterCache.removeAll()
         let dir = modulesDirectory
         if let names = try? FileManager.default.contentsOfDirectory(atPath: dir.path) {
@@ -765,8 +810,10 @@ final class ModuleStore {
     }
 
     private func close(path: String) {
+        dbLock.lock()
         openDBs.removeValue(forKey: path)
         openOrder.removeAll { $0 == path }
+        dbLock.unlock()
         chapterCache.remove(path: path)
     }
 
@@ -775,7 +822,8 @@ final class ModuleStore {
               let decoded = try? JSONDecoder().decode([String: CachedMeta].self, from: data) else {
             return
         }
-        metaCache = decoded
+        // Drop entries written by an older schema so their missing fields get measured.
+        metaCache = decoded.filter { $0.value.schemaVersion == CachedMeta.currentSchemaVersion }
     }
 
     private func saveMetaCache() {
@@ -792,7 +840,12 @@ final class ModuleStore {
             guard let attrs = try? fm.attributesOfItem(atPath: path),
                   let size = attrs[.size] as? UInt64,
                   let mdate = attrs[.modificationDate] as? Date else { continue }
-            next[key] = CachedMeta(size: size, mtime: mdate.timeIntervalSince1970, info: info)
+            next[key] = CachedMeta(
+                schemaVersion: CachedMeta.currentSchemaVersion,
+                size: size,
+                mtime: mdate.timeIntervalSince1970,
+                info: info
+            )
         }
         metaCache = next
         saveMetaCache()
@@ -834,7 +887,8 @@ final class ModuleStore {
                         kind: cached.info.kind,
                         encrypted: cached.info.encrypted,
                         hasStrongs: cached.info.hasStrongs,
-                        version: cached.info.version
+                        version: cached.info.version,
+                        health: cached.info.health
                     )
                     result.append(info)
                     return
@@ -845,6 +899,7 @@ final class ModuleStore {
                 var version = 0
                 var hasStrongs = kind == .lexicon
                 var encrypted = ModuleKind.isLegacyEncryptedExtension(ext)
+                var health: ModuleHealth?
 
                 // Huge files: only open Details; skip sample to avoid jetsam
                 let skipSample = lightweight && size > 40_000_000 // ~40 MB
@@ -864,6 +919,10 @@ final class ModuleStore {
                                 of: #"[HG]\d{1,5}"#,
                                 options: .regularExpression
                             ) != nil
+                        }
+                        // Encoding health. Never let a scoring failure hide the module.
+                        if !encrypted {
+                            health = try? db.readHealth(kind: kind)
                         }
                     } else if kind == .bible {
                         // Prefer Strong for known interlinear names without sampling
@@ -885,7 +944,8 @@ final class ModuleStore {
                     kind: kind,
                     encrypted: encrypted,
                     hasStrongs: hasStrongs,
-                    version: version
+                    version: version,
+                    health: health
                 ))
             }
         }

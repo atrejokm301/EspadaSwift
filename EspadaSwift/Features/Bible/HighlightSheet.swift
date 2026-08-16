@@ -16,7 +16,7 @@ struct HighlightSheet: View {
                     .font(themes.headlineFont)
                     .foregroundStyle(themes.theme.primaryText)
 
-                Text("Resaltar")
+                Text("Resaltar (pastel)")
                     .font(themes.captionFont)
                     .foregroundStyle(themes.theme.secondaryText)
 
@@ -33,10 +33,10 @@ struct HighlightSheet: View {
                                     if current == color {
                                         Image(systemName: "checkmark")
                                             .font(.caption.weight(.bold))
-                                            .foregroundStyle(.black.opacity(0.7))
+                                            .foregroundStyle(Color(white: 0.2).opacity(0.85))
                                     }
                                 }
-                                .overlay(Circle().strokeBorder(themes.theme.hairline, lineWidth: 1))
+                                .overlay(Circle().strokeBorder(themes.theme.hairline.opacity(0.7), lineWidth: 1))
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel(color.label)

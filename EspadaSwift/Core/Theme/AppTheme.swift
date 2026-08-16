@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import QuartzCore
 
 enum AppTheme: String, CaseIterable, Identifiable, Codable, Sendable {
     case trueDark
@@ -286,7 +287,19 @@ final class ThemeManager {
     /// uses SwiftUI `.glassEffect` / `UIGlassEffect` separately.
     ///
     /// Never force `isTranslucent = false` on UITabBar (creates a giant solid bar).
+    ///
+    /// Always apply **without** implicit UIView animations — theme picker used to wrap
+    /// `themes.theme = …` in `withAnimation`, which made nav/tab chrome morph slowly.
     func applySystemChrome() {
+        UIView.performWithoutAnimation {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            applySystemChromeUnlocked()
+            CATransaction.commit()
+        }
+    }
+
+    private func applySystemChromeUnlocked() {
         let fg = theme.uiPrimaryText
         let accentUI = UIColor(theme.accent)
         let muted = theme.preferredColorScheme == .dark
@@ -363,6 +376,12 @@ extension View {
     /// Liquid Glass sheet: refracts the reading surface behind the modal.
     func espadaFrostedSheet() -> some View {
         modifier(EspadaFrostedSheetModifier())
+    }
+
+    /// Faster sheet backdrop for **interactive** pickers (book / theme / module lists).
+    /// Solid theme fill avoids continuous glass sampling while scrolling Lazy grids.
+    func espadaSolidSheet() -> some View {
+        modifier(EspadaSolidSheetModifier())
     }
 }
 
@@ -445,8 +464,30 @@ private struct EspadaFrostedSheetModifier: ViewModifier {
     }
 }
 
+/// Opaque sheet chrome for scroll-heavy pickers (snappier than continuous Liquid Glass).
+private struct EspadaSolidSheetModifier: ViewModifier {
+    @Environment(ThemeManager.self) private var themes
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+    private var isWide: Bool {
+        EspadaAdaptive.prefersWideChrome(horizontalSizeClass: horizontalSizeClass)
+    }
+
+    func body(content: Content) -> some View {
+        let theme = themes.theme
+        content
+            .presentationBackground(theme.background)
+            .presentationCornerRadius(isWide ? 20 : 28)
+            .presentationDragIndicator(.visible)
+            .toolbarColorScheme(theme.preferredColorScheme, for: .navigationBar)
+            .toolbarBackground(theme.background.opacity(0.96), for: .navigationBar)
+    }
+}
+
 // MARK: - Highlight colors
 
+/// Verse highlight chips — same six choices (stable rawValues for saved data),
+/// recolored as soft pastels so text stays readable on Warm Paper / True Dark.
 enum HighlightColor: String, CaseIterable, Identifiable, Codable, Sendable {
     case yellow, green, blue, pink, orange, purple
 
@@ -458,30 +499,34 @@ enum HighlightColor: String, CaseIterable, Identifiable, Codable, Sendable {
         case .green: return "Verde"
         case .blue: return "Azul"
         case .pink: return "Rosa"
-        case .orange: return "Naranja"
-        case .purple: return "Violeta"
+        case .orange: return "Melocotón"
+        case .purple: return "Lila"
         }
     }
 
+    /// Soft pastel wash behind verse text (not neon system colors).
     var color: Color {
-        switch self {
-        case .yellow: return Color.yellow.opacity(0.40)
-        case .green: return Color.green.opacity(0.32)
-        case .blue: return Color.blue.opacity(0.32)
-        case .pink: return Color.pink.opacity(0.36)
-        case .orange: return Color.orange.opacity(0.36)
-        case .purple: return Color.purple.opacity(0.32)
-        }
+        pastel.opacity(0.55)
     }
 
-    var swatch: Color {
+    /// Picker swatch — full pastel, no extra opacity.
+    var swatch: Color { pastel }
+
+    /// Pastel base RGB (0…1), tuned for light + dark reading themes.
+    private var pastel: Color {
         switch self {
-        case .yellow: return .yellow
-        case .green: return .green
-        case .blue: return .blue
-        case .pink: return .pink
-        case .orange: return .orange
-        case .purple: return .purple
+        // Butter cream
+        case .yellow: return Color(red: 1.00, green: 0.94, blue: 0.70)
+        // Mint
+        case .green: return Color(red: 0.78, green: 0.93, blue: 0.82)
+        // Sky powder
+        case .blue: return Color(red: 0.75, green: 0.88, blue: 0.98)
+        // Blush
+        case .pink: return Color(red: 0.98, green: 0.80, blue: 0.88)
+        // Peach
+        case .orange: return Color(red: 1.00, green: 0.86, blue: 0.76)
+        // Lilac
+        case .purple: return Color(red: 0.88, green: 0.82, blue: 0.96)
         }
     }
 }

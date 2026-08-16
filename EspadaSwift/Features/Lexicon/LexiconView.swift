@@ -121,13 +121,29 @@ struct LexiconView: View {
 
                     Divider().overlay(themes.theme.hairline)
 
-                    // Definition from the lexicon module
-                    Text("DEFINICIÓN")
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(themes.theme.secondaryText)
+                    if entry.sections.isEmpty {
+                        // Definition from the lexicon module
+                        Text("DEFINICIÓN")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(themes.theme.secondaryText)
 
-                    LinkableStudyText(plain: entry.plain) { link in
-                        session.openStudyLink(link)
+                        LinkableStudyText(plain: entry.plain) { link in
+                            session.openStudyLink(link)
+                        }
+                    } else {
+                        // Compiled modules (Multiléxico) bundle several dictionaries in
+                        // one entry — keep each publisher separate instead of one wall.
+                        ForEach(Array(entry.sections.enumerated()), id: \.offset) { _, section in
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(section.title.uppercased())
+                                    .font(.caption2.weight(.bold))
+                                    .foregroundStyle(themes.theme.accent)
+                                LinkableStudyText(plain: section.plain) { link in
+                                    session.openStudyLink(link)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                     }
                 }
                 .padding()
@@ -306,6 +322,17 @@ struct LexiconView: View {
                     Text(s)
                         .font(themes.titleFont.weight(.semibold))
                         .foregroundStyle(themes.theme.accent)
+                }
+            }
+
+            // Publisher-marked RV1960 glosses — how this Strong is actually rendered
+            // in Spanish across the Bible, straight from the article's gloss run.
+            if let glosses = session.lexiconEntry?.glosses, !glosses.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("TRADUCCIÓN EN RV1960")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(themes.theme.secondaryText)
+                    FlowChips(items: glosses, accent: false)
                 }
             }
 

@@ -76,6 +76,12 @@ enum StrongResolve {
         guard t.count >= 2 else { return false }
         if looksLikeStrongCode(t) { return false }
 
+        // Numbered Bible books (1Jn, 2Co, 1Ti, 2Re) are letter+digit mixes and were being
+        // caught by the rule below, which deleted the book name out of every reference
+        // list: `<ref>1Jn 4:9-10</ref>` reached the cross-reference sheet as "4:9-10",
+        // leaving it unresolvable and untappable.
+        if t.first?.isNumber == true, BibleBooks.resolveBook(t) != nil { return false }
+
         // Dotted analytical morph (can be long — do not cap at 14)
         if isDottedAnalyticalMorph(t) { return true }
 
@@ -329,12 +335,15 @@ enum StrongResolve {
                 continue
             }
 
-            let greek = lastOriginalScript(in: before)
-            // Drop only when there is neither Spanish nor original script
-            if spanish.isEmpty && greek.isEmpty {
-                prevBluEnd = fullRange.upperBound
-                continue
+            // Prefer Greek/Hebrew before <blu>; if missing (particle order), peek a short window after.
+            var greek = lastOriginalScript(in: before)
+            if greek.isEmpty {
+                let afterStart = fullRange.upperBound
+                let afterEnd = text.index(afterStart, offsetBy: 120, limitedBy: text.endIndex) ?? text.endIndex
+                greek = lastOriginalScript(in: String(text[afterStart..<afterEnd]))
             }
+            // Keep Strong-bearing tokens even when Spanish is empty (bullet particles)
+            // so reverse lookup (tap G1 / H859) still works.
 
             var translit = lastTranslit(in: before)
             // Never treat morphology tags as transliteration
@@ -550,22 +559,24 @@ enum StrongResolve {
 
         if !scored.isEmpty {
             let tied = scored.filter { $0.0 == bestScore }.map { ($0.1, $0.2) }
-            // Prefer exact/high matches; only use wordIndex among ties
+            // Prefer exact/high matches. wordIndex is the index among **interlinear** tokens
+            // (not plain-RV reading words). Only use it to break ties when it matches a
+            // token index that scored, never as an index into the tied list.
             if let wi = wordIndex, wi >= 0 {
-                if wi < tied.count {
-                    return [tied[wi].1]
-                }
                 if let hit = tied.first(where: { $0.0 == wi }) {
                     return [hit.1]
                 }
             }
+            // Require a real lexical match — low scores on short common words are noise.
+            if bestScore < 70 {
+                return []
+            }
             return tied.map(\.1)
         }
 
-        // Positional fallback only when no text match (plain RV filler words often absent in iRV)
-        if let wi = wordIndex, wi >= 0, wi < tokens.count {
-            return [tokens[wi]]
-        }
+        // No text match: do **not** fall back to tokens[wordIndex].
+        // Plain RV1960 word indices do not align with interlinear token streams;
+        // positional fallback produced wrong Strong codes (e.g. tap “mundo” → unrelated G#).
         return []
     }
 

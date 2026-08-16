@@ -2,8 +2,8 @@ import SwiftUI
 
 /// Module version picker (Bible, commentary, dictionary, lexicon).
 ///
-/// Opens **already on** the current version (no visible scroll animation),
-/// YouVersion-style — then you can flick to a nearby Bible.
+/// Smooth sheet open/close: native `.sheet`, solid background, apply selection
+/// **after** dismiss so parent reload doesn’t fight the close animation.
 struct ModulePickerMenu: View {
     @Environment(ThemeManager.self) private var themes
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -16,6 +16,9 @@ struct ModulePickerMenu: View {
     let onSelect: (String?) -> Void
 
     @State private var showPicker = false
+    /// Applied in `onDismiss` so module switch doesn’t jank the sheet close.
+    @State private var pendingPath: String??
+    @State private var didPick = false
 
     private var useWide: Bool {
         EspadaAdaptive.prefersWideChrome(horizontalSizeClass: horizontalSizeClass)
@@ -35,8 +38,9 @@ struct ModulePickerMenu: View {
     }
 
     var body: some View {
-        // Same present/dismiss pattern as the book (passage) picker
         Button {
+            didPick = false
+            pendingPath = nil
             showPicker = true
         } label: {
             HStack(spacing: 6) {
@@ -56,46 +60,58 @@ struct ModulePickerMenu: View {
             .foregroundStyle(themes.theme.primaryText)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            // Interactive Liquid Glass pill on the glass nav
-            .espadaGlassChip(shape: Capsule())
+            // Solid pill — glass + popover adaptation made open/close yanky.
+            .background(themes.theme.card, in: Capsule())
             .overlay(
                 Capsule().strokeBorder(
                     selectedHasContent
                         ? Color.green.opacity(0.50)
-                        : Color.clear,
-                    lineWidth: selectedHasContent ? 1 : 0
+                        : themes.theme.hairline,
+                    lineWidth: selectedHasContent ? 1 : 0.5
                 )
             )
         }
         .buttonStyle(.plain)
         .accessibilityLabel("\(title): \(selectedLabel)\(selectedHasContent ? ", con datos" : "")")
-        // Identical presentation path to the book picker in BibleView:
-        // popover → sheet on iPhone, same frame helper + compact adaptation.
-        .popover(isPresented: $showPicker, arrowEdge: .top) {
+        .sheet(isPresented: $showPicker, onDismiss: {
+            if didPick, let pending = pendingPath {
+                let path = pending
+                pendingPath = nil
+                didPick = false
+                DispatchQueue.main.async {
+                    onSelect(path)
+                }
+            } else {
+                pendingPath = nil
+                didPick = false
+            }
+        }) {
             ModuleVersionPickerSheet(
-                title: kind == .bible ? "Versión" : title,
+                title: kind == .bible ? "Versión bíblica" : title,
                 kind: kind,
                 modules: modules,
                 selectedPath: selectedPath,
                 availability: availability,
                 onSelect: { path in
-                    onSelect(path)
+                    pendingPath = .some(path)
+                    didPick = true
                     showPicker = false
                 },
                 onClear: {
-                    onSelect(nil)
+                    pendingPath = .some(nil)
+                    didPick = true
                     showPicker = false
                 },
-                onDismiss: { showPicker = false }
+                onDismiss: {
+                    showPicker = false
+                }
             )
-            // Same as PassagePickerView presentation wrappers
             .espadaPassagePopoverFrame(wide: useWide)
-            .presentationCompactAdaptation(.sheet)
         }
     }
 }
 
-// MARK: - List opens already on current version (no scroll animation)
+// MARK: - Version list sheet
 
 private struct ModuleVersionPickerSheet: View {
     @Environment(ThemeManager.self) private var themes
@@ -111,16 +127,12 @@ private struct ModuleVersionPickerSheet: View {
     let onDismiss: () -> Void
 
     @State private var search = ""
-    /// Hide list until jump-to-current is applied so the user never sees a scroll from the top.
-    @State private var isPositioned = false
+    @State private var allowScrollJump = false
 
     private var useWide: Bool {
         EspadaAdaptive.prefersWideChrome(horizontalSizeClass: horizontalSizeClass)
     }
 
-    /// Filtered + ordered modules for the list.
-    /// When some modules have content for the current study context (green), those
-    /// rise to the top as one group; otherwise pure A–Z (default).
     private var orderedModules: (hits: [ModuleInfo], rest: [ModuleInfo], flat: [ModuleInfo]) {
         ModulePickerOrdering.partition(
             modules: modules,
@@ -144,6 +156,9 @@ private struct ModuleVersionPickerSheet: View {
         NavigationStack {
             VStack(spacing: 0) {
                 searchBar
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+
                 if sortedModules.isEmpty {
                     ContentUnavailableView(
                         modules.isEmpty ? "Sin módulos" : "Sin coincidencias",
@@ -154,7 +169,7 @@ private struct ModuleVersionPickerSheet: View {
                                 : "Pruebe otro término de búsqueda."
                         )
                     )
-                    .frame(maxHeight: .infinity)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     ScrollViewReader { proxy in
                         List {
@@ -164,6 +179,7 @@ private struct ModuleVersionPickerSheet: View {
                                     ForEach(parts.hits) { mod in
                                         moduleRow(mod)
                                             .id(mod.id)
+                                            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                                             .listRowBackground(rowBackground(for: mod))
                                     }
                                 } header: {
@@ -177,6 +193,7 @@ private struct ModuleVersionPickerSheet: View {
                                         ForEach(parts.rest) { mod in
                                             moduleRow(mod)
                                                 .id(mod.id)
+                                                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                                                 .listRowBackground(rowBackground(for: mod))
                                         }
                                     } header: {
@@ -187,29 +204,34 @@ private struct ModuleVersionPickerSheet: View {
                                     }
                                 }
                             } else {
-                                // Nothing selected / no hits → classic alphabetical list
                                 ForEach(parts.flat) { mod in
                                     moduleRow(mod)
                                         .id(mod.id)
+                                        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                                         .listRowBackground(rowBackground(for: mod))
                                 }
                             }
                         }
                         .listStyle(.plain)
                         .scrollContentBackground(.hidden)
-                        .background(themes.theme.background)
-                        // Invisible until positioned on current Bible — no scroll-down effect
-                        .opacity(isPositioned ? 1 : 0)
-                        .onAppear {
-                            positionOnCurrent(proxy)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .task {
+                            // Jump only after present settles — no opacity hide dance.
+                            try? await Task.sleep(nanoseconds: 320_000_000)
+                            guard !Task.isCancelled else { return }
+                            allowScrollJump = true
+                            jumpToCurrent(proxy)
+                        }
+                        .onChange(of: allowScrollJump) { _, ready in
+                            if ready { jumpToCurrent(proxy) }
                         }
                         .onChange(of: search) { _, _ in
-                            // Search: jump instantly, no animation
                             jumpToCurrent(proxy)
                         }
                     }
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(themes.theme.background.ignoresSafeArea())
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
@@ -226,36 +248,20 @@ private struct ModuleVersionPickerSheet: View {
                     }
                 }
             }
-            .espadaThemedScreen()
+            .toolbarBackground(themes.theme.background, for: .navigationBar)
+            .toolbarColorScheme(themes.theme.preferredColorScheme, for: .navigationBar)
         }
-        // Same sheet chrome as PassagePickerView (book picker)
-        .espadaFrostedSheet()
-        .espadaSheetChrome(wide: useWide)
-    }
-
-    /// Place the list on the current version **before** showing it (no scroll animation).
-    private func positionOnCurrent(_ proxy: ScrollViewProxy) {
-        isPositioned = false
-        jumpToCurrent(proxy)
-        // One more layout pass, still without animation, then reveal
-        DispatchQueue.main.async {
-            jumpToCurrent(proxy)
-            isPositioned = true
-        }
-        // Safety: never leave the list invisible
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-            if !isPositioned {
-                jumpToCurrent(proxy)
-                isPositioned = true
-            }
-        }
+        // Full-width sheet, solid, smooth system motion.
+        .presentationBackground(themes.theme.background)
+        .presentationDragIndicator(.visible)
+        .presentationDetents(useWide ? [.large] : [.large, .medium])
+        .presentationContentInteraction(.scrolls)
     }
 
     private func jumpToCurrent(_ proxy: ScrollViewProxy) {
-        guard let id = selectedId,
-              sortedModules.contains(where: { $0.id == id }) else {
-            return
-        }
+        guard allowScrollJump,
+              let id = selectedId,
+              sortedModules.contains(where: { $0.id == id }) else { return }
         var t = Transaction()
         t.disablesAnimations = true
         withTransaction(t) {
@@ -272,20 +278,18 @@ private struct ModuleVersionPickerSheet: View {
                 .autocorrectionDisabled()
                 .foregroundStyle(themes.theme.primaryText)
             if !search.isEmpty {
-                Button {
-                    search = ""
-                } label: {
+                Button { search = "" } label: {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(themes.theme.secondaryText)
                 }
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(themes.theme.card, in: Capsule())
-        .overlay(Capsule().strokeBorder(themes.theme.hairline, lineWidth: 1))
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(themes.theme.card)
+        )
     }
 
     private func moduleRow(_ mod: ModuleInfo) -> some View {
@@ -318,7 +322,6 @@ private struct ModuleVersionPickerSheet: View {
                 if isSelected {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundStyle(themes.theme.accent)
-                        .font(.title3)
                 }
             }
             .padding(.vertical, 4)
@@ -331,15 +334,12 @@ private struct ModuleVersionPickerSheet: View {
 
     private func rowBackground(for mod: ModuleInfo) -> some View {
         let isSelected = mod.id == selectedId || mod.path == selectedPath
-        return RoundedRectangle(cornerRadius: 10, style: .continuous)
-            .fill(isSelected ? themes.theme.accent.opacity(0.14) : Color.clear)
+        return RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(isSelected ? themes.theme.card : themes.theme.background)
             .padding(.vertical, 2)
     }
 }
 
-// MARK: - Ordering (hits first when studying; else A–Z)
-
-/// Pure sort helper so unit tests can cover commentary / dict / lex pickers.
 enum ModulePickerOrdering {
     /// - When any module has `availability[path] == true`, those come first (A–Z within group),
     ///   then the rest (A–Z).

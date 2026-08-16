@@ -127,10 +127,10 @@ struct CrossReferenceMenuButton: View {
             Image(systemName: "arrow.left.arrow.right")
                 .font(.body.weight(.semibold))
                 .foregroundStyle(themes.theme.primaryText)
-                .frame(width: 36, height: 36)
+                .frame(width: 38, height: 38)
                 .contentShape(Circle())
-                // Solid elevated chip — interactive glass was swallowing taps.
-                .espadaGlassChip(shape: Circle())
+                // Frosted glass pill (matches floating control bar).
+                .espadaGlassChip(shape: Circle(), liquid: true)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Referencias cruzadas")

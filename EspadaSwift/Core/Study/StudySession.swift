@@ -109,6 +109,8 @@ final class StudySession {
 
     /// Cancels in-flight study reloads so rapid taps cannot race.
     private var studyLoadTask: Task<Void, Never>?
+    /// Generation token so a cancelled study task never clears a newer load’s flags.
+    private var studyLoadGeneration: UInt64 = 0
     /// Cancels neighbor prefetch when the user jumps again quickly.
     private var prefetchTask: Task<Void, Never>?
     /// Cancels chapter/commentary cascade on rapid navigation or version switch.
@@ -368,10 +370,13 @@ final class StudySession {
         let hitSpanish = strongHits
             .map(\.spanish)
             .first(where: { StrongResolve.isPlausibleSpanishGloss($0) })
-        // Lexicon article RV1960 glosses (when interlinear blu is • or missing)
+        // Lexicon article RV1960 glosses (when interlinear blu is • or missing).
+        // Publisher-marked glosses win; plain-text scraping is the fallback.
         let lexiconGlosses: [String] = {
-            guard let plain = lexiconEntry?.plain, !plain.isEmpty else { return [] }
-            return StrongResolve.extractSpanishGlossesFromLexiconPlain(plain)
+            guard let entry = lexiconEntry else { return [] }
+            if !entry.glosses.isEmpty { return entry.glosses }
+            guard !entry.plain.isEmpty else { return [] }
+            return StrongResolve.extractSpanishGlossesFromLexiconPlain(entry.plain)
         }()
         var spanish = QueryNormalizer.preferredSpanishHeadword(
             [selectedWord, hitSpanish, related.first, lexiconGlosses.first].compactMap { $0 }
@@ -381,12 +386,9 @@ final class StudySession {
             related.removeAll { $0.caseInsensitiveCompare(s) == .orderedSame }
             related.insert(s, at: 0)
         }
-        // Surface related lexicon glosses too
-        for g in lexiconGlosses where StrongResolve.isPlausibleSpanishGloss(g) {
-            if !related.contains(where: { $0.caseInsensitiveCompare(g) == .orderedSame }) {
-                related.append(g)
-            }
-        }
+        // Lexicon glosses are NOT "the same Strong in this verse" — they are the
+        // dictionary's own RV1960 rendering list and now have their own row in the UI.
+        // Keeping them out of `related` stops the two lists showing the same words.
 
         // Prefer plain RV1960 companion Spanish; fall back to active Bible plain text
         let verseSpanish = companionVerseSpanish[verse]
@@ -401,10 +403,14 @@ final class StudySession {
                 originals.append(hit.greek)
             }
         }
-        // Lexicon headword (always present for Strong dictionary articles)
-        if let plain = lexiconEntry?.plain,
-           let head = StrongResolve.extractOriginalHeadwordFromLexiconPlain(plain),
-           !originals.contains(head) {
+        // Lexicon headword (always present for Strong dictionary articles).
+        // Prefer the lemma the publisher marked over a scan of flattened prose.
+        let lexiconHead: String? = {
+            if let marked = lexiconEntry?.originalScript, !marked.isEmpty { return marked }
+            guard let plain = lexiconEntry?.plain else { return nil }
+            return StrongResolve.extractOriginalHeadwordFromLexiconPlain(plain)
+        }()
+        if let head = lexiconHead, !originals.contains(head) {
             if originals.isEmpty {
                 originals.insert(head, at: 0)
             } else if !originals.contains(where: { $0 == head }) {
@@ -880,9 +886,19 @@ final class StudySession {
     }
 
     /// Schedule study reloads serially; cancels previous in-flight work.
+    /// Always clears Léxico loading flags when **this** generation ends so rapid taps
+    /// cannot leave the UI stuck on “Mapeando…” after cancellation.
     private func scheduleStudyReload(_ work: @escaping @MainActor () async -> Void) {
         studyLoadTask?.cancel()
+        studyLoadGeneration &+= 1
+        let gen = studyLoadGeneration
         studyLoadTask = Task { @MainActor in
+            defer {
+                if gen == studyLoadGeneration {
+                    isResolvingStrongs = false
+                    isLoadingLexicon = false
+                }
+            }
             await work()
         }
     }
@@ -962,9 +978,14 @@ final class StudySession {
                 chapterScope: false,
                 bookScope: false
             )
-            crossReferenceEntries = entries
-            if entries.isEmpty {
-                crossReferenceError = "Sin referencias cruzadas para \(locationLabel) en este módulo."
+            let withRefs = Self.entriesContainingReferences(entries)
+            crossReferenceEntries = withRefs
+            if withRefs.isEmpty {
+                crossReferenceError = crossReferenceEmptyMessage(
+                    modulePath: path,
+                    hadEntries: !entries.isEmpty,
+                    store: store
+                )
             }
         } catch {
             crossReferenceEntries = []
@@ -972,22 +993,91 @@ final class StudySession {
         }
     }
 
+    /// Keep only entries that actually point at another passage.
+    ///
+    /// Dedicated tools (TSK / RB-TCBe) store nothing but `<ref>` chains, so every entry
+    /// survives. Study-Bible apparatus modules mix three different things into the same
+    /// table — section headings, the verse text itself, and footnote references — and only
+    /// the last is a cross-reference. Without this filter, Juan 3:16 in RVR1960x answers
+    /// the sheet with "Tema: De tal manera amó Dios al mundo", which reads like a
+    /// reference but is a heading.
+    static func entriesContainingReferences(_ entries: [StudyEntry]) -> [StudyEntry] {
+        entries.filter { entry in
+            StudyLinkParser.findLinks(in: entry.plain).contains { link in
+                if case .verse = link { return true }
+                return false
+            }
+        }
+    }
+
+    /// Empty state that says which module was consulted and what else is installed,
+    /// rather than a bare "no references".
+    private func crossReferenceEmptyMessage(
+        modulePath: String,
+        hadEntries: Bool,
+        store: ModuleStore
+    ) -> String {
+        let all = crossReferenceModules(from: store)
+        let current = all.first { $0.path == modulePath }?.displayName ?? "este módulo"
+        let others = all
+            .filter { $0.path != modulePath }
+            .map(\.displayName)
+            .reduce(into: [String]()) { list, name in
+                if !list.contains(name) { list.append(name) }
+            }
+
+        var message = hadEntries
+            // The module covers this verse, but only with headings or notes.
+            ? "«\(current)» no tiene referencias cruzadas para \(locationLabel); en este pasaje solo trae títulos o notas."
+            : "«\(current)» no tiene nada para \(locationLabel)."
+
+        if let suggestion = others.first {
+            message += others.count == 1
+                ? " Pruebe «\(suggestion)»."
+                : " Pruebe otro módulo, por ejemplo «\(suggestion)»."
+        } else {
+            message += " Importe un módulo dedicado (p. ej. TSK / Tesoro del Conocimiento Bíblico) en Módulos."
+        }
+        return message
+    }
+
     // MARK: - Navigation
 
+    /// Clamp BCV to a real canon location (book 1…66, chapter within book, verse ≥ 1).
+    static func normalizeLocation(book: Int, chapter: Int, verse: Int) -> (book: Int, chapter: Int, verse: Int) {
+        let b = min(66, max(1, book))
+        let maxCh = BibleBooks.book(number: b)?.chapters ?? 1
+        let c = min(maxCh, max(1, chapter))
+        let v = max(1, verse)
+        return (b, c, v)
+    }
+
     func goTo(book: Int, chapter: Int, verse: Int = 1) {
-        self.book = book
-        self.chapter = max(1, chapter)
-        self.verse = max(1, verse)
+        let loc = Self.normalizeLocation(book: book, chapter: chapter, verse: verse)
+        self.book = loc.book
+        self.chapter = loc.chapter
+        self.verse = loc.verse
         selectedVerseTokens = []
         selectionSource = .navigation
-        rememberPassagePicker(testamentIsOT: book <= 39, book: book)
+        rememberPassagePicker(testamentIsOT: loc.book <= 39, book: loc.book)
         trackRecentVerse(book: self.book, chapter: self.chapter, verse: self.verse)
         persist()
         scheduleNavigationReload(includeChapter: true)
     }
 
     func selectVerse(_ v: Int) {
-        verse = v
+        // Prefer a verse that exists in the loaded chapter; otherwise clamp ≥ 1.
+        if !chapterVerses.isEmpty {
+            if chapterVerses.contains(where: { $0.verse == v }) {
+                verse = v
+            } else if let nearest = chapterVerses.map(\.verse).min(by: { abs($0 - v) < abs($1 - v) }) {
+                verse = nearest
+            } else {
+                verse = max(1, v)
+            }
+        } else {
+            verse = max(1, v)
+        }
         selectionSource = .verseChange
         trackRecentVerse()
         persist()
@@ -1283,6 +1373,10 @@ final class StudySession {
             isResolvingStrongs = false
             return
         }
+        // Freeze BCV so a fast verse hop cannot apply Greek/Spanish from the previous verse.
+        let lockedBook = book
+        let lockedChapter = chapter
+        let lockedVerse = verseNumber
         if activeInterlinearPath == nil
             || !store.modules.contains(where: { $0.path == activeInterlinearPath }) {
             resolveInterlinearMapModule(from: store)
@@ -1310,14 +1404,15 @@ final class StudySession {
         }
         do {
             let result = try await store.resolveStrongsAsync(
-                bookNumber: book,
-                chapter: chapter,
-                verse: verseNumber,
+                bookNumber: lockedBook,
+                chapter: lockedChapter,
+                verse: lockedVerse,
                 word: code,
                 wordIndex: nil,
                 interlinearModules: candidates
             )
             guard !Task.isCancelled else { return }
+            guard book == lockedBook, chapter == lockedChapter, verse == lockedVerse else { return }
             guard strongCode.map({ StrongNormalizer.normalize($0) }) == StrongNormalizer.normalize(code)
                     || strongCode == nil else { return }
             applyStrongResolve(result)
@@ -1398,7 +1493,9 @@ final class StudySession {
         let plain = entry.plain
         guard !plain.isEmpty else { return }
 
-        let glosses = StrongResolve.extractSpanishGlossesFromLexiconPlain(plain)
+        let glosses = entry.glosses.isEmpty
+            ? StrongResolve.extractSpanishGlossesFromLexiconPlain(plain)
+            : entry.glosses
         let original: String = {
             if !entry.originalScript.isEmpty { return entry.originalScript }
             return StrongResolve.extractOriginalHeadwordFromLexiconPlain(plain) ?? ""
@@ -2096,12 +2193,9 @@ final class StudySession {
             // Bar must remain the Strong code after any fill
             setLexiconSearchToStrong(sq)
 
-            if let hitPath, hitPath != activeLexiconPath {
-                activeLexiconPath = hitPath
-                savedLexiconFile = (hitPath as NSString).lastPathComponent
-                persist()
-            }
-
+            // Never auto-switch `activeLexiconPath`. Fallbacks may show an entry from another
+            // installed lexicon for study continuity, but the menu selection stays the user’s.
+            _ = hitPath
             if lexiconEntry == nil {
                 lexiconError = "Ningún léxico instalado tiene «\(sq)». Importe un léxico Strong (punto verde = tiene la entrada)."
             } else {

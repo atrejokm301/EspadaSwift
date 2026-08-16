@@ -50,12 +50,29 @@ final class StrongResolveTests: XCTestCase {
         XCTAssertEqual(tokens[0].strongs, ["G3588", "G2316"])
     }
 
-    func testParseSkipsBulletOnlyBlu() {
+    func testParseKeepsBulletParticleWithStrongAndPostBluGreek() {
+        // iRV often puts <grk> after a bullet <blu>•; reverse Strong lookup still needs G1.
         let raw = #"<num>G1</num> <blu>•</blu> <grk>α</grk> a <num>G2</num> <blu>alpha</blu>"#
         let tokens = StrongResolve.parseInterlinearTokens(raw)
-        XCTAssertEqual(tokens.count, 1)
-        XCTAssertEqual(tokens[0].spanish, "alpha")
-        XCTAssertEqual(tokens[0].strongs, ["G2"])
+        XCTAssertEqual(tokens.count, 2, "\(tokens)")
+        XCTAssertEqual(tokens[0].strongs, ["G1"])
+        XCTAssertEqual(tokens[0].spanish, "")
+        XCTAssertEqual(tokens[0].greek, "α")
+        XCTAssertEqual(tokens[1].spanish, "alpha")
+        XCTAssertEqual(tokens[1].strongs, ["G2"])
+    }
+
+    func testChooseTokensDoesNotUsePositionalFallback() {
+        // Reading-word index must not map into interlinear tokens when text does not match.
+        let tokens = [
+            InterlinearToken(spanish: "Dios", strongs: ["G2316"], greek: "Θεὸς", translit: "Theos"),
+            InterlinearToken(spanish: "mundo", strongs: ["G2889"], greek: "κόσμον", translit: "kosmon"),
+        ]
+        let none = StrongResolve.chooseTokens(word: "porque", wordIndex: 0, tokens: tokens)
+        XCTAssertTrue(none.isEmpty, "positional fallback would wrongly return Dios: \(none)")
+        let hit = StrongResolve.chooseTokens(word: "mundo", wordIndex: 99, tokens: tokens)
+        XCTAssertEqual(hit.count, 1)
+        XCTAssertEqual(hit.first?.strongs, ["G2889"])
     }
 
     // MARK: - Score

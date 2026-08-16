@@ -48,7 +48,7 @@ struct ThemePickerView: View {
                 }
             }
         }
-        .espadaFrostedSheet()
+        .espadaSolidSheet()
         // iPhone: mid-height sheet (higher on screen); iPad: large form / popover
         .espadaThemeSheetChrome(wide: useWideLayout)
     }
@@ -118,7 +118,6 @@ struct ThemePickerView: View {
                 Text("\(Int(themes.bodyFontSize))")
                     .font(.title3.monospacedDigit().weight(.semibold))
                     .foregroundStyle(themes.theme.accent)
-                    .contentTransition(.numericText())
             }
 
             HStack(spacing: 12) {
@@ -132,6 +131,8 @@ struct ThemePickerView: View {
                     step: 1
                 )
                 .tint(themes.theme.accent)
+                // Avoid implicit animations on every slider tick (re-laid out the whole sheet).
+                .transaction { $0.animation = nil }
                 .accessibilityLabel("Tamaño del texto")
                 .accessibilityValue("\(Int(themes.bodyFontSize)) puntos")
                 Text("A")
@@ -147,9 +148,8 @@ struct ThemePickerView: View {
                 ForEach(sizes, id: \.self) { size in
                     let selected = Int(themes.bodyFontSize) == size
                     Button {
-                        withAnimation(.easeInOut(duration: 0.15)) {
-                            themes.bodyFontSize = Double(size)
-                        }
+                        // Instant — animating font size re-measured every card + Bible behind the sheet.
+                        themes.bodyFontSize = Double(size)
                     } label: {
                         Text("\(size)")
                             .font(.caption.weight(.semibold).monospacedDigit())
@@ -203,9 +203,7 @@ struct ThemePickerView: View {
                 ForEach(ReadingFontFamily.allCases) { family in
                     let selected = themes.readingFontFamily == family
                     Button {
-                        withAnimation(.easeInOut(duration: 0.15)) {
-                            themes.readingFontFamily = family
-                        }
+                        themes.readingFontFamily = family
                     } label: {
                         Text(family.label)
                             .font(BibleFont.body(size: 14, family: family))
@@ -279,16 +277,14 @@ struct ThemePickerView: View {
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
                         .strokeBorder(themes.theme.hairline, lineWidth: 1)
                 )
-                .animation(.easeInOut(duration: 0.2), value: themes.bodyFontSize)
-                .animation(.easeInOut(duration: 0.2), value: themes.readingFontFamily)
         }
     }
 
     private func themeTile(_ theme: AppTheme, themes: ThemeManager, tall: Bool) -> some View {
         Button {
-            withAnimation(.easeInOut(duration: 0.22)) {
-                themes.theme = theme
-            }
+            // Instant theme swap. Animating this also animated UIKit nav/tab chrome
+            // and the glass sheet background — felt laggy and “weird”.
+            themes.theme = theme
         } label: {
             VStack(alignment: .leading, spacing: tall ? 12 : 10) {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)

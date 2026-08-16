@@ -98,6 +98,61 @@ final class ModuleDatabase: @unchecked Sendable {
         }
     }
 
+    /// Sample several rows and score the module's encoding health.
+    ///
+    /// Deliberately spread with `ORDER BY rowid` offsets rather than a plain `LIMIT`:
+    /// damage clusters (the Reina ligature only appears where the word needs it), so
+    /// reading the first N rows understates it. Bounded so catalog scans stay quick.
+    func readHealth(kind: ModuleKind) throws -> ModuleHealth {
+        let columns: [(String, String)]
+        switch kind {
+        case .bible:
+            columns = [("Bible", "Scripture")]
+        case .commentary:
+            columns = [
+                ("VerseCommentary", "Comments"),
+                ("ChapterCommentary", "Comments"),
+                ("BookCommentary", "Comments"),
+            ]
+        case .dictionary, .lexicon:
+            columns = [("Dictionary", "Definition"), ("Lexicon", "Definition")]
+        case .reference:
+            columns = [("Reference", "Content")]
+        }
+
+        return try dbQueue.read { db in
+            var health = ModuleHealth()
+            for (table, column) in columns {
+                guard try tableExists(db, table) else { continue }
+                // MAX(rowid) is an index lookup; COUNT(*) would scan the whole table and
+                // these files reach 130 MB. Sparse rowids only make sampling coarser.
+                guard let total = try Int.fetchOne(db, sql: "SELECT MAX(rowid) FROM \"\(table)\""),
+                      total > 0 else { continue }
+                // Up to 120 rows spread across the table, each clipped to 4 KB.
+                let wanted = min(120, total)
+                let stride = max(1, total / wanted)
+                // Row-based fetch: e-Sword stores mixed/NULL cells and `String.fetchAll`
+                // traps on those. `cellString` already handles NULL, BLOB and UTF-16.
+                let rows = try Row.fetchAll(
+                    db,
+                    sql: """
+                    SELECT substr("\(column)", 1, 4096) AS sample FROM "\(table)"
+                    WHERE rowid % ? = 0
+                    LIMIT ?
+                    """,
+                    arguments: [stride, wanted]
+                )
+                for row in rows {
+                    let sample = cellString(row, "sample")
+                    guard !sample.isEmpty else { continue }
+                    health.accumulate(sample: ESwordText.decodeAllHTMLEntities(sample))
+                }
+                if health.sampledRows > 0 { break }
+            }
+            return health
+        }
+    }
+
     func loadChapter(book: Int, chapter: Int) throws -> [(verse: Int, scripture: String)] {
         try dbQueue.read { db in
             let rows = try Row.fetchAll(
@@ -610,16 +665,33 @@ final class ModuleDatabase: @unchecked Sendable {
 
     /// Universal entry builder for **every** dictionary / lexicon module:
     /// plain text + Hebrew/Greek lemma + Latin pronunciation when present in the article.
+    ///
+    /// Structure is read from the **raw** field first (`LexiconArticle`), because e-Sword
+    /// marks lemma / pronunciation / glosses with inline colors that flattening destroys.
+    /// Plain-text scraping stays as the fallback for modules that mark nothing.
     private static func makeStudyEntry(topic: String, definition: String) -> DictEntry {
         let plain = boundedPlain(definition)
-        let script = StrongResolve.extractOriginalHeadwordFromLexiconPlain(plain) ?? ""
-        let pron = StrongResolve.extractTranslitFromLexiconPlain(plain) ?? ""
+        let article = LexiconArticle.parse(definition)
+
+        let script = article.lemma.isEmpty
+            ? (StrongResolve.extractOriginalHeadwordFromLexiconPlain(plain) ?? "")
+            : article.lemma
+        let pron = article.pronunciation.isEmpty
+            ? (StrongResolve.extractTranslitFromLexiconPlain(plain) ?? "")
+            : article.pronunciation
+        let glosses = article.glosses.isEmpty
+            ? StrongResolve.extractSpanishGlossesFromLexiconPlain(plain)
+            : article.glosses
+
         return DictEntry(
             topic: topic,
             plain: plain,
             html: plain,
             originalScript: script,
-            pronunciation: pron
+            pronunciation: pron,
+            glosses: glosses,
+            sections: article.sections,
+            strongRefs: article.strongRefs
         )
     }
 

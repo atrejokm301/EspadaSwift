@@ -317,11 +317,21 @@ private struct EspadaGlassChipModifier<S: Shape>: ViewModifier {
 
     func body(content: Content) -> some View {
         let theme = themes.theme
-        // Solid elevated chip sits *on* the liquid chrome bar.
-        // Liquid/interactive glass on the label steals taps and breaks popovers (Recientes / CR).
+        // Never apply `.glassEffect` *on* the interactive content itself — that steals
+        // Button hits and breaks popovers (Recientes / CR / chapter controls).
+        // Glass lives in a non-hit-testable background; the label keeps the taps.
         if liquid, !reduceTransparency {
             content
-                .glassEffect(theme.liquidGlass(for: .chip, interactive: false), in: shape)
+                .background {
+                    shape
+                        .fill(Color.clear)
+                        .glassEffect(theme.liquidGlass(for: .chip, interactive: false), in: shape)
+                        .allowsHitTesting(false)
+                }
+                .overlay(
+                    shape.stroke(theme.hairline.opacity(0.35), lineWidth: 0.5)
+                        .allowsHitTesting(false)
+                )
         } else {
             content
                 .background(

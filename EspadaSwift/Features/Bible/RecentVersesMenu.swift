@@ -22,10 +22,10 @@ struct RecentVersesMenu: View {
             Image(systemName: "clock.arrow.circlepath")
                 .font(.body.weight(.semibold))
                 .foregroundStyle(themes.theme.primaryText)
-                .frame(width: 36, height: 36)
+                .frame(width: 38, height: 38)
                 .contentShape(Circle())
-                // Solid elevated chip (not interactive liquid glass) — reliable taps + popover.
-                .espadaGlassChip(shape: Circle())
+                // Frosted glass pill (Kavsoft / Fitness+ floating control style).
+                .espadaGlassChip(shape: Circle(), liquid: true)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Versículos recientes")

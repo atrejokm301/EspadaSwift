@@ -2,6 +2,9 @@ import Foundation
 
 enum StrongNormalizer {
     /// Build lookup variants for a Strong's code (G26, H430, zero-padded, bare digits).
+    ///
+    /// Important: only **leading** zeros are stripped from the number (`H0430` → core `430`).
+    /// Never strip trailing zeros (`H430` must not become `H43`).
     static func candidates(_ raw: String) -> [String] {
         let s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             .uppercased()
@@ -16,31 +19,20 @@ enum StrongNormalizer {
 
         push(s)
 
+        let digitCore: String
         let prefix: Character?
-        let digits: String
 
-        if s.first == "G" || s.first == "H" {
-            prefix = s.first
-            digits = String(s.dropFirst()).trimmingCharacters(in: CharacterSet(charactersIn: "0"))
-            if digits.isEmpty, s.dropFirst().allSatisfy({ $0 == "0" }) {
-                // keep zero forms below
-            }
+        if let first = s.first, first == "G" || first == "H" {
+            prefix = first
+            digitCore = stripLeadingZeros(String(s.dropFirst()))
         } else if s.allSatisfy(\.isNumber) {
             prefix = nil
-            digits = s.trimmingCharacters(in: CharacterSet(charactersIn: "0"))
+            digitCore = stripLeadingZeros(s)
         } else {
             return out
         }
 
-        let digitCore: String = {
-            if s.first == "G" || s.first == "H" {
-                let d = String(s.dropFirst())
-                let trimmed = d.trimmingCharacters(in: CharacterSet(charactersIn: "0"))
-                return trimmed.isEmpty ? "0" : trimmed
-            }
-            let trimmed = s.trimmingCharacters(in: CharacterSet(charactersIn: "0"))
-            return trimmed.isEmpty ? "0" : trimmed
-        }()
+        guard !digitCore.isEmpty else { return out }
 
         if let prefix {
             push("\(prefix)\(digitCore)")
@@ -64,8 +56,20 @@ enum StrongNormalizer {
         return out
     }
 
+    /// Strip only leading zeros; keep trailing zeros (H430, G100, H30).
+    private static func stripLeadingZeros(_ digits: String) -> String {
+        guard !digits.isEmpty, digits.allSatisfy(\.isNumber) else { return digits }
+        var i = digits.startIndex
+        while i < digits.endIndex, digits[i] == "0" {
+            i = digits.index(after: i)
+        }
+        return i == digits.endIndex ? "0" : String(digits[i...])
+    }
+
     static func looksLikeStrong(_ text: String) -> Bool {
-        let s = text.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let s = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+            .replacingOccurrences(of: " ", with: "")
         guard let first = s.first, first == "G" || first == "H" else { return false }
         let rest = s.dropFirst()
         return !rest.isEmpty && rest.allSatisfy(\.isNumber) && rest.count <= 5

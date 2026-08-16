@@ -259,6 +259,24 @@ struct LibraryView: View {
                     .font(.caption)
                     .foregroundStyle(themes.theme.secondaryText)
                     .lineLimit(2)
+
+                // Encoding health — explains a module that reads badly, and says when a
+                // cleaner copy of the same work is already installed.
+                if let warning = mod.health?.spanishSummary {
+                    HStack(alignment: .top, spacing: 5) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(warning)
+                            if store.demotedDuplicatePaths.contains(mod.path) {
+                                Text("Hay otra copia de este módulo en mejor estado; Espada usa esa.")
+                            }
+                        }
+                        .font(.caption2)
+                        .foregroundStyle(themes.theme.secondaryText)
+                    }
+                }
             }
         }
         .padding(14)

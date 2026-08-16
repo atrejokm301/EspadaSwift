@@ -16,7 +16,7 @@ enum EspadaAdaptive {
 
 extension View {
     /// Sheet detents for passage picker.
-    /// iPhone: mid sheet that fits content; iPad: large form.
+    /// iPhone: single mid detent (multi-detent was causing re-layout thrash while scrolling).
     @ViewBuilder
     func espadaSheetChrome(wide: Bool) -> some View {
         if wide {
@@ -25,11 +25,12 @@ extension View {
                 .presentationDragIndicator(.visible)
                 .presentationContentInteraction(.scrolls)
         } else {
-            // Phone: usable height without swallowing the whole screen
+            // Single fixed height — multi-detent sheets re-layout while scrolling and feel clumsy.
             self
-                .presentationDetents([.fraction(0.72), .large])
+                .presentationDetents([.height(520)])
                 .presentationDragIndicator(.visible)
                 .presentationContentInteraction(.scrolls)
+                .presentationBackgroundInteraction(.disabled)
         }
     }
 

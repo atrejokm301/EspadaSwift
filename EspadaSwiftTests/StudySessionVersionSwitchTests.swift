@@ -121,6 +121,25 @@ final class StudySessionVersionSwitchTests: XCTestCase {
         XCTAssertNil(ModulePositionMemory.fileKey(path: ""))
     }
 
+    func testGoToClampsInvalidChapterAndBook() {
+        let session = StudySession()
+        // Juan has 21 chapters — chapter 99 must clamp
+        session.goTo(book: 43, chapter: 99, verse: 1)
+        XCTAssertEqual(session.book, 43)
+        XCTAssertEqual(session.chapter, 21)
+        XCTAssertEqual(session.verse, 1)
+
+        session.goTo(book: 0, chapter: 1, verse: 1)
+        XCTAssertEqual(session.book, 1)
+        session.goTo(book: 200, chapter: 1, verse: 1)
+        XCTAssertEqual(session.book, 66)
+
+        let loc = StudySession.normalizeLocation(book: 19, chapter: 999, verse: 0)
+        XCTAssertEqual(loc.book, 19)
+        XCTAssertEqual(loc.chapter, 150) // Salmos
+        XCTAssertEqual(loc.verse, 1)
+    }
+
     /// Switching modules must not mutate BCV even if dictionary/lexicon restore runs.
     func testAnyModuleKindSwitchPreservesPassage() {
         let session = StudySession()
