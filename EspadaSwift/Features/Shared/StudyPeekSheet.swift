@@ -201,6 +201,7 @@ enum StudyPeek: Identifiable, Hashable {
 /// Latin uses the selected reading font; Hebrew/Greek → Libertinus Serif only.
 struct LinkableStudyText: View {
     @Environment(ThemeManager.self) private var themes
+    @Environment(ModuleStore.self) private var store
     let plain: String
     var onLink: (StudyLink) -> Void
 
@@ -223,7 +224,10 @@ struct LinkableStudyText: View {
         let linked = StudyLinkParser.attributed(
             plain,
             bodyColor: themes.theme.primaryText,
-            linkColor: themes.theme.accent
+            linkColor: themes.theme.accent,
+            // Hebrew/Greek printed inside a definition becomes tappable wherever the
+            // form index can name a Strong's code for it.
+            scriptResolver: { store.strong(forOriginalForm: $0) }
         )
         return ScriptText.applyScriptFonts(
             to: linked,

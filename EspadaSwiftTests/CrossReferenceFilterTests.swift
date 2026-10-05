@@ -106,3 +106,49 @@ final class CrossReferenceFilterTests: XCTestCase {
         XCTAssertEqual(links.count, 12, "expected every reference to resolve: \(plain)")
     }
 }
+
+/// Regression for the lexicon card: modules that mark no gloss run fall back to scraping
+/// plain text, and that scraper was offering the article's opening line as a translation.
+final class GlossFallbackTests: XCTestCase {
+
+    /// Real `Strong-ES` shape for G3439 — the first line is lemma + transliteration +
+    /// etymology, not a Spanish gloss.
+    func testLemmaLineIsNotOfferedAsATranslation() {
+        let plain = "μονογενής monogenés de G3441 y G1096; único nacido, i.e. solo único, unigénito."
+        let glosses = StrongResolve.extractSpanishGlossesFromLexiconPlain(plain)
+
+        XCTAssertFalse(
+            glosses.contains { $0.contains("μονογενής") },
+            "original script is not a Spanish translation: \(glosses)"
+        )
+        XCTAssertFalse(
+            glosses.contains { $0.contains("G3441") || $0.contains("G1096") },
+            "a Strong reference is not a translation: \(glosses)"
+        )
+        XCTAssertFalse(
+            glosses.contains { $0.lowercased().hasPrefix("i.e") },
+            "editorial shorthand is not a translation: \(glosses)"
+        )
+        XCTAssertTrue(glosses.contains("unigénito"), "\(glosses)")
+        XCTAssertFalse(
+            glosses.contains { $0.hasSuffix(".") },
+            "a gloss should not inherit the sentence's full stop: \(glosses)"
+        )
+    }
+
+    /// Hebrew articles must be filtered the same way.
+    func testHebrewLemmaLineIsAlsoRejected() {
+        let plain = "לֵב leb forma de H3824; corazón, ánimo, cordura."
+        let glosses = StrongResolve.extractSpanishGlossesFromLexiconPlain(plain)
+        XCTAssertFalse(glosses.contains { $0.contains("לֵב") }, "\(glosses)")
+        XCTAssertFalse(glosses.contains { $0.contains("H3824") }, "\(glosses)")
+        XCTAssertTrue(glosses.contains("corazón"), "\(glosses)")
+    }
+
+    /// Ordinary gloss lists must survive untouched.
+    func testNormalGlossListIsUnaffected() {
+        let plain = "de G25; amor, i.e. afecto o benevolencia: ágape, amado, amor."
+        let glosses = StrongResolve.extractSpanishGlossesFromLexiconPlain(plain)
+        XCTAssertEqual(glosses, ["ágape", "amado", "amor"], "\(glosses)")
+    }
+}

@@ -19,6 +19,94 @@ final class ModuleStore {
     private let maxOpenPressure = 3
     /// Interactive module IO (chapter / commentary / dict). Utility was starving version switches.
     private let ioQueue = DispatchQueue(label: "com.asignaciondelcielo.espada.modules", qos: .userInitiated)
+
+    // MARK: - Strong's reverse index
+
+    /// State of the concordance index, for the UI to explain itself while it builds.
+    enum StrongIndexState: Equatable, Sendable {
+        case idle
+        case building(Double)
+        case ready(occurrences: Int)
+        case unavailable(String)
+    }
+
+    private(set) var strongIndexState: StrongIndexState = .idle
+    private var strongIndex: StrongIndex?
+    private var strongIndexTask: Task<Void, Never>?
+
+    /// Open the index, building it if the interlinear changed. Safe to call repeatedly —
+    /// a build already in flight is not restarted.
+    ///
+    /// Built at `.utility` rather than on the interactive queue: it is a 4-second one-off
+    /// that nothing is waiting on, and reading should stay smooth while it runs.
+    @MainActor
+    func ensureStrongIndex(interlinearPath: String?) {
+        guard strongIndexTask == nil else { return }
+        guard let path = interlinearPath, FileManager.default.fileExists(atPath: path) else {
+            strongIndexState = .unavailable("No hay una Biblia interlineal instalada.")
+            return
+        }
+
+        strongIndexTask = Task { [weak self] in
+            guard let self else { return }
+            let source = StrongIndex.Source(path: path)
+            do {
+                let index = try await Task.detached(priority: .utility) {
+                    try StrongIndex(url: StrongIndex.defaultURL())
+                }.value
+
+                if index.isCurrent(for: source) {
+                    await MainActor.run {
+                        self.strongIndex = index
+                        self.strongIndexState = .ready(occurrences: index.occurrenceCount)
+                        self.strongIndexTask = nil
+                    }
+                    return
+                }
+
+                await MainActor.run { self.strongIndexState = .building(0) }
+                // Lexicons contribute citation forms the interlinear never inflects.
+                let lexiconPaths = await MainActor.run {
+                    self.modules(of: .lexicon).filter { !$0.encrypted }.map(\.path)
+                        + self.modules(of: .dictionary).filter { $0.hasStrongs && !$0.encrypted }.map(\.path)
+                }
+                let count = try await Task.detached(priority: .utility) {
+                    let occurrences = try index.rebuild(from: source) { fraction in
+                        Task { @MainActor in
+                            if case .building = self.strongIndexState {
+                                self.strongIndexState = .building(fraction)
+                            }
+                        }
+                    }
+                    _ = try? index.indexLexiconHeadwords(paths: lexiconPaths)
+                    return occurrences
+                }.value
+
+                await MainActor.run {
+                    self.strongIndex = index
+                    self.strongIndexState = .ready(occurrences: count)
+                    self.strongIndexTask = nil
+                }
+            } catch {
+                await MainActor.run {
+                    self.strongIndexState = .unavailable(error.localizedDescription)
+                    self.strongIndexTask = nil
+                }
+            }
+        }
+    }
+
+    /// Strong's code for a Hebrew/Greek word, for linking original script inside prose.
+    /// Returns nil until the index is built, so text simply renders unlinked meanwhile.
+    func strong(forOriginalForm form: String) -> String? {
+        strongIndex?.strong(forForm: form)
+    }
+
+    /// Every verse using this Strong's code, plus the true total when the list is capped.
+    func concordance(for strong: String, limit: Int = 500) -> (verses: [StrongIndex.Occurrence], total: Int) {
+        guard let index = strongIndex else { return ([], 0) }
+        return (index.occurrences(of: strong, limit: limit), index.occurrenceCount(of: strong))
+    }
     /// Protects openDBs / openOrder. All open+query paths take this lock so concurrent
     /// Task.detached lookups cannot race or evict a live DatabaseQueue (device crash).
     private let dbLock = NSLock()

@@ -5,6 +5,9 @@ struct LexiconView: View {
     @Environment(ModuleStore.self) private var store
     @Environment(ThemeManager.self) private var themes
 
+    /// Full passage list lives in a sheet so the definition keeps the screen.
+    @State var showConcordance = false
+
     var body: some View {
         @Bindable var session = session
         return NavigationStack {
@@ -77,6 +80,7 @@ struct LexiconView: View {
                 if let new, StrongNormalizer.looksLikeStrong(new) {
                     session.setLexiconSearchToStrong(new)
                 }
+                session.reloadConcordance(from: store)
             }
             .onChange(of: session.strongHits) { _, hits in
                 if let code = hits.first(where: { StrongNormalizer.looksLikeStrong($0.strong) })?.strong {
@@ -87,6 +91,21 @@ struct LexiconView: View {
                 if !resolving, let code = session.lexiconStrongForSearchBar {
                     session.setLexiconSearchToStrong(code)
                 }
+            }
+            // Concordance index: built once in the background from the interlinear.
+            .task {
+                store.ensureStrongIndex(
+                    interlinearPath: StrongResolve.rankedInterlinearModules(store.modules(of: .bible)).first?.path
+                )
+                session.reloadConcordance(from: store)
+            }
+            .onChange(of: store.strongIndexState) { _, _ in
+                session.reloadConcordance(from: store)
+            }
+            .sheet(isPresented: $showConcordance) {
+                ConcordanceSheet(code: session.strongCode ?? "")
+                    .environment(session)
+                    .environment(themes)
             }
         }
     }
@@ -146,7 +165,7 @@ struct LexiconView: View {
                         }
                     }
                 }
-                .padding()
+                .padding(ReadingMetrics.cardPadding(fontSize: themes.bodyFontSize))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -156,7 +175,8 @@ struct LexiconView: View {
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
                         .strokeBorder(themes.theme.hairline, lineWidth: 1)
                 )
-                .padding(12)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 12)
                 .animation(.easeInOut(duration: 0.18), value: themes.bodyFontSize)
             }
             .espadaProMotionScroll()
@@ -313,15 +333,20 @@ struct LexiconView: View {
                 .layoutPriority(1)
             }
 
-            // Strong code
+            // Strong code, with the concordance link on the same line — it is a property
+            // of the code, and keeping it here costs no extra vertical space.
             if let s = strong, !s.isEmpty {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("STRONG")
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(themes.theme.secondaryText)
-                    Text(s)
-                        .font(themes.titleFont.weight(.semibold))
-                        .foregroundStyle(themes.theme.accent)
+                HStack(alignment: .lastTextBaseline, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("STRONG")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(themes.theme.secondaryText)
+                        Text(s)
+                            .font(themes.titleFont.weight(.semibold))
+                            .foregroundStyle(themes.theme.accent)
+                    }
+                    Spacer(minLength: 4)
+                    concordanceSection
                 }
             }
 
@@ -364,7 +389,7 @@ struct LexiconView: View {
                 }
             }
         }
-        .padding(14)
+        .padding(ReadingMetrics.cardPadding(fontSize: themes.bodyFontSize))
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -374,6 +399,48 @@ struct LexiconView: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .strokeBorder(themes.theme.accent.opacity(0.28), lineWidth: 1)
         )
+    }
+}
+
+extension LexiconView {
+
+    /// One line, not a wall of chips. A common word has thousands of hits, so the card
+    /// only says how many and opens the full list in a sheet.
+    @ViewBuilder
+    var concordanceSection: some View {
+        switch store.strongIndexState {
+        case .building(let fraction):
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.mini)
+                Text("Preparando concordancia… \(Int(fraction * 100))%")
+                    .font(.caption2)
+                    .foregroundStyle(themes.theme.secondaryText)
+            }
+
+        case .ready where session.concordanceTotal > 0:
+            Button {
+                showConcordance = true
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "text.magnifyingglass")
+                        .font(.caption2)
+                    Text("\(session.concordanceTotal) versículo\(session.concordanceTotal == 1 ? "" : "s")")
+                        .font(themes.footnoteFont.weight(.semibold))
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(themes.theme.secondaryText)
+                }
+                .foregroundStyle(themes.theme.accent)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Aparece en \(session.concordanceTotal) versículos")
+            .accessibilityHint("Muestra todos los pasajes que usan este número Strong")
+
+        default:
+            EmptyView()
+        }
     }
 }
 
@@ -390,6 +457,8 @@ private struct FlowChips: View {
             ForEach(items, id: \.self) { item in
                 let chip = Text(item)
                     .font(themes.footnoteFont.weight(.semibold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                     .foregroundStyle(accent ? themes.theme.accent : themes.theme.primaryText)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)

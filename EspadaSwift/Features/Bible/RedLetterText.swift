@@ -11,6 +11,14 @@ struct RedLetterText: View {
     var plainFallback: String = ""
     var fontSize: Double? = nil
     var allowsSelection: Bool = true
+    /// Verse number drawn inline, ahead of the text.
+    ///
+    /// Printed Bibles set the number into the text flow, not into a reserved column.
+    /// A column has to be as wide as the widest number in the chapter, so every
+    /// single-digit verse opens with a band of empty space, and every wrapped line is
+    /// indented past it. Inline, the number costs only its own width and the following
+    /// lines run the full measure.
+    var verseNumber: Int? = nil
 
     private var size: Double { fontSize ?? themes.bodyFontSize }
 
@@ -41,6 +49,16 @@ struct RedLetterText: View {
 
     private var attributed: AttributedString {
         var result = AttributedString()
+        if let verseNumber {
+            var marker = AttributedString("\(verseNumber)\u{2009}")
+            marker.font = BibleFont.bold(
+                size: ReadingMetrics.verseNumberSize(fontSize: size),
+                family: themes.readingFontFamily
+            )
+            marker.foregroundColor = themes.theme.secondaryText
+            marker.baselineOffset = size * 0.28
+            result += marker
+        }
         let base = themes.theme.primaryText
         let woc = themes.theme.wordsOfChrist
         let family = themes.readingFontFamily

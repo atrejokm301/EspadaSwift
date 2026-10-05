@@ -993,6 +993,76 @@ final class StudySession {
         }
     }
 
+    /// Put the meaning-carrying code first when one Spanish word carries several.
+    ///
+    /// Interlinears group a phrase under one gloss and emit every code in it:
+    ///
+    ///     ‹ τὸν12 μονογενῆ13 ›  <num>G3588</num> <num>G3439</num>  <blu>unigénito</blu>
+    ///
+    /// Taking the first code meant tapping «unigénito» opened **G3588** — the definite
+    /// article «the», which occurs in 7 053 verses — instead of **G3439** «unigénito»,
+    /// which occurs in 9. The lexicon has been answering with the article for every
+    /// grouped phrase; the concordance simply made it visible.
+    ///
+    /// Frequency is the discriminator: grammatical particles are common by nature and
+    /// content words are not, so the rarest code in the group is the one being glossed.
+    /// Verified against real groupings — «Hijo» G3588/G5207 → G5207, «Dios»
+    /// G3588/G2316 → G2316, «unigénito» G3588/G3439 → G3439.
+    ///
+    /// Order is left untouched when the index has not been built, so behaviour degrades
+    /// to the previous ordering rather than to something arbitrary.
+    static func preferringContentWords(_ hits: [StrongHit], store: ModuleStore?) -> [StrongHit] {
+        guard hits.count > 1, let store else { return hits }
+        let ranked = hits.map { hit -> (hit: StrongHit, frequency: Int) in
+            let count = store.concordance(for: hit.strong, limit: 1).total
+            // Unknown codes sort last rather than winning on a zero count.
+            return (hit, count == 0 ? Int.max : count)
+        }
+        guard ranked.contains(where: { $0.frequency != Int.max }) else { return hits }
+        return ranked
+            .enumerated()
+            .sorted { a, b in
+                a.element.frequency == b.element.frequency
+                    ? a.offset < b.offset
+                    : a.element.frequency < b.element.frequency
+            }
+            .map(\.element.hit)
+    }
+
+    // MARK: - Concordance (Strong's reverse lookup)
+
+    /// Verses using the Strong's code under study, and the true total when capped.
+    var concordanceVerses: [StrongIndex.Occurrence] = []
+    var concordanceTotal: Int = 0
+
+    /// Refresh the concordance for the active Strong's code.
+    /// Cheap enough to call on every selection change — an indexed lookup is ~0.3 ms
+    /// against the ~1 900 ms a full scan of the interlinear used to take.
+    @MainActor
+    func reloadConcordance(from store: ModuleStore) {
+        guard let code = strongCode ?? strongHits.first?.strong,
+              StrongNormalizer.looksLikeStrong(code) else {
+            concordanceVerses = []
+            concordanceTotal = 0
+            return
+        }
+        // The list has its own screen now, so it can afford a deeper slice.
+        let result = store.concordance(for: code, limit: 500)
+        concordanceVerses = result.verses
+        concordanceTotal = result.total
+    }
+
+    /// Jump to a concordance hit, keeping the Strong's code under study.
+    @MainActor
+    func openConcordanceVerse(_ occurrence: StrongIndex.Occurrence) {
+        openStudyLink(.verse(
+            book: occurrence.book,
+            chapter: occurrence.chapter,
+            verse: occurrence.verse,
+            verseEnd: nil
+        ))
+    }
+
     /// Keep only entries that actually point at another passage.
     ///
     /// Dedicated tools (TSK / RB-TCBe) store nothing but `<ref>` chains, so every entry
@@ -1471,6 +1541,7 @@ final class StudySession {
             ]
         }
         strongResolveNote = result.note.isEmpty ? nil : result.note
+        strongHits = Self.preferringContentWords(strongHits, store: store)
         if let first = strongHits.first {
             // Windows: Strong code is the lexicon search key — never leave Spanish in the bar
             setLexiconSearchToStrong(first.strong)

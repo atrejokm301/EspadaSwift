@@ -772,6 +772,19 @@ enum StrongResolve {
             guard isPlausibleSpanishGloss(t) else { continue }
             // Skip long definition phrases
             guard t.count <= 40, !t.contains(" i.e"), !t.contains("figurativ") else { continue }
+            // A gloss is Spanish. Modules that mark no gloss run fall back to this
+            // scraper, and without these two rules the article's opening line
+            // ("μονογενής monogenés de G3441 y G1096") was offered as a translation —
+            // which then also overflowed the chip row.
+            guard !t.contains(where: { ch in
+                ch.unicodeScalars.contains { s in
+                    let v = s.value
+                    return (v >= 0x0590 && v <= 0x05FF) || (v >= 0xFB1D && v <= 0xFB4F)
+                        || (v >= 0x0370 && v <= 0x03FF) || (v >= 0x1F00 && v <= 0x1FFF)
+                }
+            }) else { continue }
+            guard t.range(of: #"\b[HG]\d{1,5}\b"#, options: .regularExpression) == nil else { continue }
+            guard !t.lowercased().hasPrefix("i.e") else { continue }
             // Prefer words that are mostly letters (and spaces/hyphens)
             let letters = t.filter(\.isLetter).count
             guard letters >= 2, Double(letters) / Double(max(t.count, 1)) >= 0.55 else { continue }
@@ -1074,7 +1087,13 @@ enum StrongResolve {
             .replacingOccurrences(of: "—", with: ",")
             .replacingOccurrences(of: "–", with: ",")
             .components(separatedBy: CharacterSet(charactersIn: ",;"))
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .map {
+                // The last gloss inherits the sentence's full stop; a chip reading
+                // "unigénito." looks like a typo next to "único nacido".
+                $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .trimmingCharacters(in: CharacterSet(charactersIn: ".:"))
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            }
             .filter { !$0.isEmpty }
     }
 

@@ -257,8 +257,7 @@ struct BibleView: View {
                         .id(row.verse)
                     }
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+                .espadaReadingMargins(fontSize: themes.bodyFontSize)
                 .espadaTrackScrollForChrome(chrome)
             }
             .espadaProMotionScroll()
@@ -376,32 +375,19 @@ struct VerseRowView: View {
     var body: some View {
         // One version only: never stack a second Bible (e.g. RV1960) under the active text.
         HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Button {
-                onHighlight()
-            } label: {
-                Text("\(row.verse)")
-                    .font(BibleFont.bold(size: max(11, themes.bodyFontSize - 4), family: themes.readingFontFamily))
-                    .foregroundStyle(isSelected ? themes.theme.accent : themes.theme.secondaryText)
-                    .frame(width: 26, alignment: .trailing)
-                    .padding(.vertical, 2)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Versículo \(row.verse). Toque para resaltar.")
-
             Group {
                 if studyMode, let tokens, !tokens.isEmpty {
                     TokenFlowView(tokens: tokens, verse: row.verse)
                 } else {
                     // Global red-letter reading path (WOC from module markup)
-                    RedLetterText(raw: row.raw, plainFallback: row.plain)
+                    RedLetterText(raw: row.raw, plainFallback: row.plain, verseNumber: row.verse)
                 }
             }
             .contentShape(Rectangle())
             .onTapGesture { onSelect() }
             .onLongPressGesture(minimumDuration: 0.35) { onHighlight() }
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, ReadingMetrics.rowInset(fontSize: themes.bodyFontSize))
         .padding(.vertical, 5)
         .background(
             RoundedRectangle(cornerRadius: corner, style: .continuous)
@@ -432,6 +418,17 @@ struct TokenFlowView: View {
 
     var body: some View {
         WrappingHStack(alignment: .leading, spacing: 3) {
+            // Same inline marker as the reading path, so switching modes does not
+            // shift the text column.
+            Text("\(verse)\u{2009}")
+                .font(BibleFont.bold(
+                    size: ReadingMetrics.verseNumberSize(fontSize: themes.bodyFontSize),
+                    family: themes.readingFontFamily
+                ))
+                .foregroundStyle(themes.theme.secondaryText)
+                .baselineOffset(themes.bodyFontSize * 0.28)
+                .accessibilityLabel("Versículo \(verse)")
+
             ForEach(tokens) { token in
                 tokenView(token)
             }
@@ -545,6 +542,14 @@ struct WrappingHStack: Layout {
     var alignment: HorizontalAlignment = .leading
     var spacing: CGFloat = 4
 
+    /// Natural size, never wider than the row. An item that does not fit is offered the
+    /// full width so it can wrap or truncate itself instead of overflowing.
+    private func clampedSize(of sub: LayoutSubview, toWidth width: CGFloat) -> CGSize {
+        let natural = sub.sizeThatFits(.unspecified)
+        guard width.isFinite, natural.width > width else { return natural }
+        return sub.sizeThatFits(ProposedViewSize(width: width, height: nil))
+    }
+
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         let maxWidth = proposal.width ?? .infinity
         var x: CGFloat = 0
@@ -553,7 +558,10 @@ struct WrappingHStack: Layout {
         var maxX: CGFloat = 0
 
         for sub in subviews {
-            let size = sub.sizeThatFits(.unspecified)
+            // Clamp to the container: measuring unconstrained let a single long item
+            // (a mis-parsed gloss, a long reference) draw straight past the card edge
+            // and off the screen.
+            let size = clampedSize(of: sub, toWidth: maxWidth)
             if x + size.width > maxWidth, x > 0 {
                 y += rowHeight + spacing
                 x = 0
@@ -572,7 +580,7 @@ struct WrappingHStack: Layout {
         var rowHeight: CGFloat = 0
 
         for sub in subviews {
-            let size = sub.sizeThatFits(.unspecified)
+            let size = clampedSize(of: sub, toWidth: bounds.width)
             if x + size.width > bounds.maxX, x > bounds.minX {
                 y += rowHeight + spacing
                 x = bounds.minX

@@ -71,11 +71,17 @@ enum StudyLinkParser {
     /// Cap link scanning so huge dictionary articles cannot freeze or jetsam the app.
     private static let maxLinkScanChars = 48_000
 
+    /// Resolves a Hebrew/Greek word to a Strong's code, so original-script words inside a
+    /// definition can be tapped. Supplied by the caller because it needs the index;
+    /// `nil` keeps this parser pure and leaves script runs as plain text.
+    typealias ScriptResolver = (String) -> String?
+
     /// Build an AttributedString with tappable Strong + verse links.
     static func attributed(
         _ plain: String,
         bodyColor: Color,
-        linkColor: Color
+        linkColor: Color,
+        scriptResolver: ScriptResolver? = nil
     ) -> AttributedString {
         let scanSource: String
         if plain.count > maxLinkScanChars {
@@ -87,7 +93,7 @@ enum StudyLinkParser {
         var attr = AttributedString(plain)
         attr.foregroundColor = bodyColor
 
-        let matches = findMatches(in: scanSource)
+        let matches = findMatches(in: scanSource, scriptResolver: scriptResolver)
         for m in matches {
             guard let url = m.link.toURL() else { continue }
             let ns = NSRange(m.range, in: scanSource)
@@ -100,11 +106,29 @@ enum StudyLinkParser {
     }
 
     static func findLinks(in plain: String) -> [StudyLink] {
-        findMatches(in: plain).map(\.link)
+        findMatches(in: plain, scriptResolver: nil).map(\.link)
     }
 
-    private static func findMatches(in plain: String) -> [Match] {
+    private static func findMatches(
+        in plain: String,
+        scriptResolver: ScriptResolver?
+    ) -> [Match] {
         var matches: [Match] = []
+
+        // Hebrew / Greek words, resolved through the form index. Runs that cannot be
+        // resolved are simply not linked, so an unknown word still reads normally.
+        if let scriptResolver,
+           let re = try? NSRegularExpression(
+               pattern: "[\u{0590}-\u{05FF}\u{FB1D}-\u{FB4F}\u{0370}-\u{03FF}\u{1F00}-\u{1FFF}]{2,}",
+               options: []
+           ) {
+            let ns = NSRange(plain.startIndex..., in: plain)
+            re.enumerateMatches(in: plain, options: [], range: ns) { result, _, _ in
+                guard let result, let range = Range(result.range, in: plain) else { return }
+                guard let code = scriptResolver(String(plain[range])) else { return }
+                matches.append(Match(range: range, link: .strong(code)))
+            }
+        }
 
         // Strong: H3068, G26, h430
         if let re = try? NSRegularExpression(pattern: #"\b([HhGg]\d{1,5})\b"#, options: []) {
